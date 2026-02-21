@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef } from 'react'
-import { AppRoot, ConfigProvider, AdaptivityProvider, ViewWidth, View, Panel, PanelHeader, PanelHeaderBack, PanelHeaderButton, Card, Text, Title, Button, Spinner, Input, FormItem, Snackbar } from '@vkontakte/vkui'
+import { AppRoot, ConfigProvider, AdaptivityProvider, ViewWidth, View, Panel, PanelHeader, PanelHeaderBack, PanelHeaderButton, Card, Text, Title, Button, Spinner, Input, FormItem, Snackbar, Checkbox } from '@vkontakte/vkui'
 import { Icon28ShoppingCartOutline, Icon28FavoriteOutline, Icon28Favorite, Icon28DeleteOutline } from '@vkontakte/icons'
+import bridge from '@vkontakte/vk-bridge'
 import '@vkontakte/vkui/dist/vkui.css'
 
-const API = 'http://192.168.1.2:3001'
+const API = import.meta.env.VITE_API_URL || 'http://192.168.1.2:3001'
 
 function Lightbox({ src, onClose }) {
   return (
@@ -87,10 +88,21 @@ function App() {
   const [favorites, setFavorites] = useState([])
   const [selectedProduct, setSelectedProduct] = useState(null)
   const [snackbar, setSnackbar] = useState(null)
-  const [form, setForm] = useState({ name: '', phone: '', address: '' })
+  const [vkUser, setVkUser] = useState(null)
+  const [form, setForm] = useState({ firstName: '', lastName: '', phone: '' })
+  const [agreePolicy, setAgreePolicy] = useState(false)
   const [submitting, setSubmitting] = useState(false)
+  const [promoCode, setPromoCode] = useState('')
+  const [promoApplied, setPromoApplied] = useState(null)
+  const [promoError, setPromoError] = useState('')
+  const [promoLoading, setPromoLoading] = useState(false)
 
   useEffect(() => {
+    bridge.send('VKWebAppInit').catch(() => {})
+    bridge.send('VKWebAppGetUserInfo').then(user => {
+      setVkUser(user)
+      setForm(prev => ({ ...prev, firstName: user.first_name || '', lastName: user.last_name || '' }))
+    }).catch(() => {})
     fetch(`${API}/api/products`)
       .then(res => res.json())
       .then(data => { setProducts(data); setLoading(false) })
@@ -104,26 +116,68 @@ function App() {
   const removeFromCart = (cartId) => {
     setCart(prev => {
       const newCart = prev.filter(item => item.cartId !== cartId)
-      if (newCart.length === 0) setActivePanel('catalog')
+      if (newCart.length === 0) { setPromoApplied(null); setPromoCode(''); setActivePanel('catalog') }
       return newCart
     })
   }
 
   const toggleFavorite = (id) => setFavorites(prev => prev.includes(id) ? prev.filter(f => f !== id) : [...prev, id])
-  const total = cart.reduce((sum, item) => sum + item.price, 0)
+
+  const subtotal = cart.reduce((sum, item) => sum + item.price, 0)
+  const discount = promoApplied
+    ? promoApplied.type === 'percent'
+      ? Math.round(subtotal * promoApplied.discount / 100)
+      : Math.min(promoApplied.discount, subtotal)
+    : 0
+  const total = subtotal - discount
+
+  const applyPromo = async () => {
+    if (!promoCode.trim()) return
+    setPromoLoading(true)
+    setPromoError('')
+    try {
+      const res = await fetch(`${API}/api/promocodes/${promoCode.trim().toUpperCase()}`)
+      const data = await res.json()
+      if (data.valid) {
+        setPromoApplied(data)
+        setSnackbar(`Промокод применён! Скидка: ${data.type === 'percent' ? data.discount + '%' : data.discount + ' ₽'}`)
+      } else {
+        setPromoError(data.reason || 'Недействительный промокод')
+        setPromoApplied(null)
+      }
+    } catch {
+      setPromoError('Ошибка проверки промокода')
+    }
+    setPromoLoading(false)
+  }
+
+  const removePromo = () => { setPromoApplied(null); setPromoCode(''); setPromoError('') }
 
   const submitOrder = () => {
-    if (!form.name || !form.phone || !form.address) { setSnackbar('Заполните все поля!'); return }
+    if (!form.firstName || !form.lastName || !form.phone) { setSnackbar('Заполните все поля!'); return }
+    if (!agreePolicy) { setSnackbar('Необходимо согласие с политикой обработки данных!'); return }
     setSubmitting(true)
+    const name = `${form.lastName} ${form.firstName}`
     fetch(`${API}/api/orders`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ items: cart, total, name: form.name, phone: form.phone, address: form.address })
+      body: JSON.stringify({
+        items: cart, total, name,
+        phone: form.phone,
+        address: 'СДЭК',
+        vk_id: vkUser?.id || null,
+        promo_code: promoApplied ? promoCode : null,
+        promo_discount: promoApplied?.type === 'percent' ? promoApplied.discount : null,
+        promo_fixed: promoApplied?.type === 'fixed' ? promoApplied.discount : null,
+      })
     })
       .then(res => res.json())
       .then(data => {
         setCart([])
-        setForm({ name: '', phone: '', address: '' })
+        setForm(prev => ({ ...prev, phone: '' }))
+        setAgreePolicy(false)
+        setPromoApplied(null)
+        setPromoCode('')
         setActivePanel('catalog')
         setSnackbar(`Заказ №${data.id} оформлен! Мы свяжемся с вами.`)
         setSubmitting(false)
@@ -218,8 +272,46 @@ function App() {
                         </div>
                       )
                     })}
+
+                    <div style={{ padding: '16px', borderBottom: '1px solid #333' }}>
+                      {!promoApplied
+                        ? <>
+                            <Text style={{ color: '#888', fontSize: '13px', marginBottom: '8px' }}>Есть промокод?</Text>
+                            <div style={{ display: 'flex', gap: '8px' }}>
+                              <Input
+                                placeholder="Введите промокод"
+                                value={promoCode}
+                                onChange={e => { setPromoCode(e.target.value.toUpperCase()); setPromoError('') }}
+                                style={{ flex: 1 }}
+                              />
+                              <Button loading={promoLoading} onClick={applyPromo}>Применить</Button>
+                            </div>
+                            {promoError && <Text style={{ color: '#e24a4a', fontSize: '12px', marginTop: '6px' }}>{promoError}</Text>}
+                          </>
+                        : <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#1a3a1a', padding: '10px 12px', borderRadius: '8px' }}>
+                            <Text style={{ color: '#44cc88', fontSize: '13px' }}>
+                              ✓ Промокод <strong>{promoCode}</strong> — скидка {promoApplied.type === 'percent' ? promoApplied.discount + '%' : promoApplied.discount + ' ₽'}
+                            </Text>
+                            <button onClick={removePromo} style={{ background: 'none', border: 'none', color: '#888', cursor: 'pointer', fontSize: '16px' }}>✕</button>
+                          </div>
+                      }
+                    </div>
+
                     <div style={{ padding: '16px' }}>
-                      <Title level="2" style={{ marginBottom: '12px' }}>Итого: {total} ₽</Title>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                        <Text style={{ color: '#888', fontSize: '13px' }}>Товары ({cart.length} шт.)</Text>
+                        <Text style={{ fontSize: '13px' }}>{subtotal} ₽</Text>
+                      </div>
+                      {promoApplied && (
+                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                          <Text style={{ color: '#44cc88', fontSize: '13px' }}>Скидка по промокоду</Text>
+                          <Text style={{ color: '#44cc88', fontSize: '13px' }}>−{discount} ₽</Text>
+                        </div>
+                      )}
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '16px', paddingTop: '8px', borderTop: '1px solid #333' }}>
+                        <Title level="3">Итого</Title>
+                        <Title level="3">{total} ₽</Title>
+                      </div>
                       <Button size="l" stretched onClick={() => setActivePanel('checkout')}>Оформить заказ</Button>
                     </div>
                   </>
@@ -229,19 +321,71 @@ function App() {
             <Panel id="checkout">
               <PanelHeader before={<PanelHeaderBack onClick={() => setActivePanel('cart')} />}>Оформление</PanelHeader>
               <div style={{ padding: '16px' }}>
-                <FormItem top="Ваше имя">
-                  <Input placeholder="Иван Иванов" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} />
+                {vkUser && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px', padding: '12px', background: '#2a2a2a', borderRadius: '8px' }}>
+                    {vkUser.photo_100 && <img src={vkUser.photo_100} alt="" style={{ width: '40px', height: '40px', borderRadius: '50%' }} />}
+                    <Text>{vkUser.first_name} {vkUser.last_name}</Text>
+                  </div>
+                )}
+                <div style={{ background: '#2a1a1a', border: '1px solid #e24a4a44', borderRadius: '8px', padding: '12px', marginBottom: '16px' }}>
+                  <Text style={{ color: '#ffaa44', fontSize: '13px' }}>
+                    ⚠️ Укажите настоящие данные — они нужны для получения посылки в пункте СДЭК. Неверные данные = потерянный заказ!
+                  </Text>
+                </div>
+                <FormItem top="Имя">
+                  <Input placeholder="Иван" value={form.firstName} onChange={e => setForm({ ...form, firstName: e.target.value })} />
+                </FormItem>
+                <FormItem top="Фамилия">
+                  <Input placeholder="Иванов" value={form.lastName} onChange={e => setForm({ ...form, lastName: e.target.value })} />
                 </FormItem>
                 <FormItem top="Телефон">
                   <Input placeholder="+7 900 000 00 00" value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} />
                 </FormItem>
-                <FormItem top="Адрес доставки">
-                  <Input placeholder="Город, улица, дом, квартира" value={form.address} onChange={e => setForm({ ...form, address: e.target.value })} />
-                </FormItem>
-                <FormItem>
-                  <Title level="3" style={{ marginBottom: '12px' }}>Итого: {total} ₽</Title>
-                  <Button size="l" stretched loading={submitting} onClick={submitOrder}>Подтвердить заказ</Button>
-                </FormItem>
+                <div style={{ padding: '8px 0 16px' }}>
+                  <Checkbox checked={agreePolicy} onChange={e => setAgreePolicy(e.target.checked)}>
+                    <Text style={{ fontSize: '12px' }}>
+                      Я согласен с{' '}
+                      <span onClick={() => setActivePanel('policy')} style={{ color: '#5b9cf6', cursor: 'pointer' }}>
+                        политикой обработки персональных данных
+                      </span>
+                    </Text>
+                  </Checkbox>
+                </div>
+                <div style={{ borderTop: '1px solid #333', paddingTop: '12px', marginBottom: '16px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                    <Text style={{ color: '#888', fontSize: '13px' }}>Товары</Text>
+                    <Text style={{ fontSize: '13px' }}>{subtotal} ₽</Text>
+                  </div>
+                  {promoApplied && (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                      <Text style={{ color: '#44cc88', fontSize: '13px' }}>Скидка</Text>
+                      <Text style={{ color: '#44cc88', fontSize: '13px' }}>−{discount} ₽</Text>
+                    </div>
+                  )}
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <Title level="3">Итого</Title>
+                    <Title level="3">{total} ₽</Title>
+                  </div>
+                </div>
+                <Button size="l" stretched loading={submitting} disabled={!agreePolicy} onClick={submitOrder}>
+                  Подтвердить заказ
+                </Button>
+              </div>
+            </Panel>
+
+            <Panel id="policy">
+              <PanelHeader before={<PanelHeaderBack onClick={() => setActivePanel('checkout')} />}>
+                Политика обработки данных
+              </PanelHeader>
+              <div style={{ padding: '16px' }}>
+                <Title level="2" style={{ marginBottom: '16px' }}>Политика обработки персональных данных</Title>
+                <p style={{ color: '#ccc', fontSize: '13px', lineHeight: '1.6', marginBottom: '12px' }}>Настоящая политика определяет порядок обработки персональных данных пользователей магазина METKA SHOP.</p>
+                <p style={{ color: '#ccc', fontSize: '13px', lineHeight: '1.6', marginBottom: '12px' }}><strong style={{ color: '#fff' }}>Какие данные мы собираем:</strong> имя, фамилия, номер телефона, идентификатор ВКонтакте.</p>
+                <p style={{ color: '#ccc', fontSize: '13px', lineHeight: '1.6', marginBottom: '12px' }}><strong style={{ color: '#fff' }}>Для чего используются данные:</strong> исключительно для оформления и доставки заказа через службу СДЭК.</p>
+                <p style={{ color: '#ccc', fontSize: '13px', lineHeight: '1.6', marginBottom: '12px' }}><strong style={{ color: '#fff' }}>Передача третьим лицам:</strong> данные передаются только в службу доставки СДЭК в объёме, необходимом для оформления отправления.</p>
+                <p style={{ color: '#ccc', fontSize: '13px', lineHeight: '1.6', marginBottom: '12px' }}><strong style={{ color: '#fff' }}>Хранение данных:</strong> данные хранятся на защищённом сервере и не передаются иным третьим лицам.</p>
+                <p style={{ color: '#ccc', fontSize: '13px', lineHeight: '1.6', marginBottom: '16px' }}><strong style={{ color: '#fff' }}>Ваши права:</strong> вы можете запросить удаление ваших данных, написав нам в сообщения сообщества ВКонтакте.</p>
+                <Button stretched onClick={() => setActivePanel('checkout')}>Понятно, вернуться к заказу</Button>
               </div>
             </Panel>
 

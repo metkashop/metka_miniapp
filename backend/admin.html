@@ -1,251 +1,424 @@
 <!DOCTYPE html>
 <html lang="ru">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>METKA SHOP — Админка</title>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-  <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: sans-serif; background: #1a1a1a; color: #fff; }
-    .header { background: #111; padding: 16px 24px; border-bottom: 1px solid #333; }
-    .header h1 { font-size: 20px; }
-    .tabs { display: flex; background: #111; border-bottom: 1px solid #333; }
-    .tab { padding: 14px 24px; cursor: pointer; color: #888; font-size: 14px; border-bottom: 2px solid transparent; }
-    .tab:hover { color: #fff; }
-    .tab.active { color: #fff; border-bottom: 2px solid #4a90e2; }
-    .content { padding: 24px; display: none; }
-    .content.active { display: block; }
-    table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
-    th, td { padding: 10px; border: 1px solid #333; text-align: left; font-size: 14px; }
-    th { background: #2a2a2a; }
-    tr:hover { background: #222; }
-    .form { background: #2a2a2a; padding: 20px; border-radius: 8px; max-width: 500px; margin-bottom: 24px; }
-    .form input { width: 100%; padding: 8px; margin: 6px 0 12px; background: #333; border: 1px solid #444; color: #fff; border-radius: 4px; }
-    .form label { font-size: 13px; color: #aaa; }
-    .btn { padding: 10px 20px; background: #4a90e2; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; margin-right: 8px; }
-    .btn:hover { background: #357abd; }
-    .btn-danger { background: #e24a4a; }
-    .btn-danger:hover { background: #bd3535; }
-    .btn-green { background: #4ae24a; color: #000; }
-    .btn-green:hover { background: #35bd35; }
-    .status { padding: 4px 8px; border-radius: 4px; font-size: 12px; }
-    .status-new { background: #4a90e2; }
-    .status-done { background: #4ae24a; color: #000; }
-    .hint { font-size: 12px; color: #888; margin-bottom: 16px; }
-    .empty { text-align: center; color: #888; padding: 40px; }
-  </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>METKA SHOP — Админка</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: system-ui, sans-serif; background: #1a1a1a; color: #e0e0e0; }
+  .header { background: #111; padding: 16px 24px; border-bottom: 1px solid #333; }
+  .header h1 { font-size: 18px; color: #fff; }
+  .tabs { display: flex; border-bottom: 1px solid #333; background: #111; }
+  .tab { padding: 12px 24px; cursor: pointer; color: #888; border-bottom: 2px solid transparent; font-size: 14px; }
+  .tab.active { color: #fff; border-bottom-color: #5b9cf6; }
+  .content { padding: 24px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { text-align: left; padding: 10px 12px; color: #888; font-weight: 500; border-bottom: 1px solid #333; white-space: nowrap; }
+  td { padding: 10px 12px; border-bottom: 1px solid #2a2a2a; vertical-align: middle; }
+  tr.order-main:hover td { background: #222; cursor: pointer; }
+  .badge { display: inline-block; padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; }
+  .badge-new { background: #1a3a5c; color: #5b9cf6; }
+  .badge-processing { background: #3a2a1a; color: #ffaa44; }
+  .badge-shipped { background: #1a3a2a; color: #44cc88; }
+  .badge-done { background: #2a2a2a; color: #888; }
+  .badge-cancelled { background: #3a1a1a; color: #e24a4a; }
+  .btn { padding: 6px 12px; border-radius: 6px; border: none; cursor: pointer; font-size: 12px; font-weight: 500; white-space: nowrap; }
+  .btn-primary { background: #5b9cf6; color: #fff; }
+  .btn-danger { background: #e24a4a; color: #fff; }
+  .btn-ghost { background: #2a2a2a; color: #ccc; }
+  .btn-warn { background: #ffaa44; color: #111; }
+  .btn:hover { opacity: 0.85; }
+  .btn-block { display: block; width: 100%; margin-bottom: 6px; text-align: center; }
+  .detail-row { display: none; }
+  .detail-row.open { display: table-row; }
+  .detail-box { background: #1e1e1e; border: 1px solid #333; border-radius: 8px; margin: 4px 0 8px; overflow: hidden; }
+  .col-label { font-size: 11px; color: #555; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 10px; font-weight: 600; }
+  .field-label { font-size: 11px; color: #666; margin-bottom: 2px; }
+  .field-value { font-size: 13px; color: #e0e0e0; margin-bottom: 8px; }
+  .field-value a { color: #5b9cf6; text-decoration: none; }
+  .order-item-row { display: grid; grid-template-columns: 1fr auto; gap: 8px; padding: 6px 0; border-bottom: 1px solid #2a2a2a; font-size: 12px; }
+  .order-item-row:last-child { border-bottom: none; }
+  .item-name { color: #ccc; }
+  .item-detail { color: #888; font-size: 11px; }
+  .item-price { color: #fff; font-weight: 500; text-align: right; white-space: nowrap; }
+  .calc-row { display: flex; justify-content: space-between; padding: 4px 0; font-size: 12px; color: #888; }
+  .calc-row.total { color: #fff; font-weight: 600; font-size: 14px; border-top: 1px solid #333; padding-top: 8px; margin-top: 4px; }
+  .calc-row.promo { color: #44cc88; }
+  .detail-footer { display: flex; justify-content: space-between; align-items: center; padding: 10px 16px; background: #161616; border-top: 1px solid #2a2a2a; }
+  .detail-footer-right { display: flex; gap: 8px; }
+  select.status-select { background: #2a2a2a; color: #ccc; border: 1px solid #444; border-radius: 4px; padding: 5px 8px; font-size: 12px; width: 100%; margin-bottom: 8px; }
+  .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); z-index: 100; align-items: center; justify-content: center; }
+  .modal.open { display: flex; }
+  .modal-box { background: #222; border: 1px solid #444; border-radius: 12px; padding: 24px; max-width: 400px; width: 90%; }
+  .modal-box h3 { margin-bottom: 12px; }
+  .modal-box p { color: #888; font-size: 13px; margin-bottom: 20px; }
+  .modal-actions { display: flex; gap: 8px; justify-content: flex-end; }
+  .empty { text-align: center; color: #555; padding: 40px; }
+  input[type=text], input[type=number], input[type=date] { background: #2a2a2a; border: 1px solid #444; color: #fff; padding: 8px 12px; border-radius: 6px; font-size: 13px; width: 100%; }
+  select.form-select { background: #2a2a2a; color: #ccc; border: 1px solid #444; border-radius: 6px; padding: 8px 12px; font-size: 13px; width: 100%; }
+  .field label { font-size: 12px; color: #888; display: block; margin-bottom: 4px; }
+  .form-card { background: #222; border: 1px solid #333; border-radius: 8px; padding: 16px; margin-bottom: 16px; }
+  hr.divider { border: none; border-top: 1px solid #2a2a2a; margin: 8px 0; }
+</style>
 </head>
 <body>
-  <div class="header"><h1>METKA SHOP — Админка</h1></div>
 
-  <div class="tabs">
-    <div class="tab active" onclick="switchTab('orders')">Заказы</div>
-    <div class="tab" onclick="switchTab('products')">Товары</div>
-    <div class="tab" onclick="switchTab('promocodes')">Промокоды</div>
-  </div>
+<div class="header"><h1>⚡ METKA SHOP — Админка</h1></div>
 
-  <!-- ЗАКАЗЫ -->
-  <div id="tab-orders" class="content active">
+<div class="tabs">
+  <div class="tab active" onclick="showTab('orders')">Заказы</div>
+  <div class="tab" onclick="showTab('products')">Товары</div>
+  <div class="tab" onclick="showTab('promos')">Промокоды</div>
+</div>
+
+<div class="content">
+
+  <div id="tab-orders">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+      <span style="color:#888;font-size:13px;" id="orders-count"></span>
+      <button class="btn btn-ghost" onclick="loadOrders()">↻ Обновить</button>
+    </div>
     <table>
       <thead>
-        <tr>
-          <th>#</th><th>Дата</th><th>Имя</th><th>Телефон</th><th>Адрес</th><th>Товары</th><th>Сумма</th><th>Статус</th>
-        </tr>
+        <tr><th>#</th><th>Дата</th><th>Покупатель</th><th>Телефон</th><th>Сумма</th><th>Статус</th><th></th></tr>
       </thead>
       <tbody id="orders-body"></tbody>
     </table>
   </div>
 
-  <!-- ТОВАРЫ -->
-  <div id="tab-products" class="content">
-    <div class="form">
-      <h3 style="margin-bottom:16px">Добавить товар</h3>
-      <label>Название</label>
-      <input id="p-name" placeholder="Футболка METKA..." />
-      <label>Цена (₽)</label>
-      <input id="p-price" type="number" placeholder="1500" />
-      <label>Цвет</label>
-      <input id="p-color" placeholder="Чёрная" />
-      <label>Размеры (через запятую)</label>
-      <input id="p-sizes" placeholder="S,M,L,XL" />
-      <label>Описание</label>
-      <input id="p-description" placeholder="Описание товара..." />
-      <br>
-      <button class="btn" onclick="addProduct()">Добавить</button>
+  <div id="tab-products" style="display:none">
+    <div style="margin-bottom:16px;">
+      <button class="btn btn-primary" onclick="document.getElementById('add-product-form').style.display=''">+ Добавить товар</button>
     </div>
-
-    <div class="form">
-      <h3 style="margin-bottom:8px">Загрузить из Excel</h3>
-      <p class="hint">Колонки в файле: Название | Цена | Цвет | Размеры | Описание</p>
-      <input type="file" id="excel-file" accept=".xlsx,.xls" style="margin-bottom:12px" />
-      <button class="btn btn-green" onclick="importExcel()">Загрузить</button>
+    <div id="add-product-form" style="display:none" class="form-card">
+      <h3 style="margin-bottom:12px;">Новый товар</h3>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
+        <div class="field"><label>Артикул</label><input type="text" id="p-art"></div>
+        <div class="field"><label>Название</label><input type="text" id="p-name"></div>
+        <div class="field"><label>Цена</label><input type="number" id="p-price" min="0"></div>
+        <div class="field"><label>Цвет</label><input type="text" id="p-color"></div>
+        <div class="field"><label>Размеры (через запятую)</label><input type="text" id="p-sizes" value="XS,S,M,L,XL,XXL,3XL"></div>
+        <div class="field"><label>Картинки (через запятую)</label><input type="text" id="p-images"></div>
+      </div>
+      <div class="field" style="margin-bottom:12px;"><label>Описание</label><input type="text" id="p-desc"></div>
+      <div style="display:flex;gap:8px;">
+        <button class="btn btn-primary" onclick="addProduct()">Сохранить</button>
+        <button class="btn btn-ghost" onclick="document.getElementById('add-product-form').style.display='none'">Отмена</button>
+      </div>
     </div>
-
     <table>
-      <thead>
-        <tr><th>#</th><th>Название</th><th>Цена</th><th>Цвет</th><th>Размеры</th><th>Действия</th></tr>
-      </thead>
+      <thead><tr><th>Арт</th><th>Название</th><th>Цена</th><th>Размеры</th><th></th></tr></thead>
       <tbody id="products-body"></tbody>
     </table>
   </div>
 
-  <!-- ПРОМОКОДЫ -->
-  <div id="tab-promocodes" class="content">
-    <div class="form">
-      <h3 style="margin-bottom:16px">Создать промокод</h3>
-      <label>Код</label>
-      <input id="promo-code" placeholder="SUMMER20" />
-      <label>Скидка (%)</label>
-      <input id="promo-discount" type="number" placeholder="20" />
-      <br>
-      <button class="btn" onclick="addPromo()">Создать</button>
+  <div id="tab-promos" style="display:none">
+    <div class="form-card">
+      <h3 style="margin-bottom:12px;">Новый промокод</h3>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:8px;">
+        <div class="field"><label>Код</label><input type="text" id="promo-code" placeholder="SALE10"></div>
+        <div class="field"><label>Тип скидки</label><select id="promo-type" class="form-select"><option value="percent">% от суммы</option><option value="fixed">Фикс. сумма (₽)</option></select></div>
+        <div class="field"><label>Размер скидки</label><input type="number" id="promo-discount" placeholder="10" min="1"></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:12px;">
+        <div class="field"><label>Действует с</label><input type="date" id="promo-from"></div>
+        <div class="field"><label>Действует по</label><input type="date" id="promo-to"></div>
+        <div class="field"><label>Макс. срабатываний (пусто = ∞)</label><input type="number" id="promo-maxuses" placeholder="∞" min="1"></div>
+      </div>
+      <button class="btn btn-primary" onclick="addPromo()">Добавить промокод</button>
     </div>
     <table>
-      <thead>
-        <tr><th>Код</th><th>Скидка</th><th>Активен</th><th>Действия</th></tr>
-      </thead>
+      <thead><tr><th>Код</th><th>Тип</th><th>Скидка</th><th>Период</th><th>Использований</th><th>Активен</th><th></th></tr></thead>
       <tbody id="promos-body"></tbody>
     </table>
   </div>
 
-  <script>
-    const API = 'http://localhost:3001'
+</div>
 
-    function switchTab(name) {
-      document.querySelectorAll('.tab').forEach((t, i) => {
-        t.classList.toggle('active', ['orders','products','promocodes'][i] === name)
-      })
-      document.querySelectorAll('.content').forEach(c => c.classList.remove('active'))
-      document.getElementById(`tab-${name}`).classList.add('active')
+<div class="modal" id="modal-delete-order">
+  <div class="modal-box">
+    <h3>Удалить заказ?</h3>
+    <p>Это действие нельзя отменить. Заказ будет удалён полностью.</p>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal('modal-delete-order')">Отмена</button>
+      <button class="btn btn-danger" onclick="confirmDeleteOrder()">Удалить</button>
+    </div>
+  </div>
+</div>
+<div class="modal" id="modal-delete-personal">
+  <div class="modal-box">
+    <h3>Удалить персональные данные?</h3>
+    <p>Имя, телефон и ссылка на профиль ВК будут удалены. Заказ останется в истории.</p>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal('modal-delete-personal')">Отмена</button>
+      <button class="btn btn-warn" onclick="confirmDeletePersonal()">Удалить данные</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const API = 'http://localhost:3001'
+let pendingOrderId = null
+const statusLabels = { new:'Новый', processing:'В обработке', shipped:'Отправлен', done:'Выполнен', cancelled:'Отменён' }
+const statusClass = { new:'badge-new', processing:'badge-processing', shipped:'badge-shipped', done:'badge-done', cancelled:'badge-cancelled' }
+
+function showTab(tab) {
+  ['orders','products','promos'].forEach((t,i) => {
+    document.getElementById('tab-'+t).style.display = t===tab ? '' : 'none'
+    document.querySelectorAll('.tab')[i].classList.toggle('active', t===tab)
+  })
+  if (tab==='orders') loadOrders()
+  if (tab==='products') loadProducts()
+  if (tab==='promos') loadPromos()
+}
+
+async function loadOrders() {
+  const res = await fetch(API+'/api/orders')
+  const orders = await res.json()
+  document.getElementById('orders-count').textContent = 'Всего заказов: '+orders.length
+  const tbody = document.getElementById('orders-body')
+  tbody.innerHTML = ''
+  if (!orders.length) { tbody.innerHTML='<tr><td colspan="7" class="empty">Заказов пока нет</td></tr>'; return }
+
+  orders.slice().reverse().forEach(order => {
+    const items = JSON.parse(order.items || '[]')
+    const date = new Date(order.created_at).toLocaleString('ru')
+    const status = order.status || 'new'
+    const name = order.name || '—'
+    const vkLink = order.vk_id
+      ? '<a href="https://vk.com/id'+order.vk_id+'" target="_blank" style="color:#5b9cf6">'+name+'</a>'
+      : name
+
+    const mainRow = document.createElement('tr')
+    mainRow.className = 'order-main'
+    mainRow.onclick = () => toggleDetail(order.id)
+    mainRow.innerHTML =
+      '<td>'+order.id+'</td>'+
+      '<td style="white-space:nowrap">'+date+'</td>'+
+      '<td>'+vkLink+'</td>'+
+      '<td>'+(order.phone||'—')+'</td>'+
+      '<td style="white-space:nowrap;font-weight:600">'+order.total+' ₽</td>'+
+      '<td><span class="badge '+statusClass[status]+'">'+statusLabels[status]+'</span></td>'+
+      '<td style="color:#555">▼</td>'
+    tbody.appendChild(mainRow)
+
+    // Группируем товары
+    const grouped = {}
+    items.forEach(function(i) {
+      const key = i.art+'_'+i.size
+      if (!grouped[key]) grouped[key] = { name:i.name, art:i.art, size:i.size, price:i.price, qty:0, total:0 }
+      grouped[key].qty++
+      grouped[key].total += i.price
+    })
+    let itemsHtml = ''
+    Object.values(grouped).forEach(function(i) {
+      itemsHtml +=
+        '<div class="order-item-row">'+
+          '<div><div class="item-name">'+i.name+'</div><div class="item-detail">Арт: '+i.art+' · Размер: '+i.size+'</div></div>'+
+          '<div class="item-price">'+i.qty+' × '+i.price+' ₽ = '+i.total+' ₽</div>'+
+        '</div>'
+    })
+
+    // Расчёт
+    const subtotal = items.reduce(function(s,i){ return s+i.price }, 0)
+    const hasPromo = order.promo_code && order.promo_code !== 'null' && order.promo_code !== ''
+    const promoDiscount = hasPromo
+      ? (order.promo_discount ? Math.round(subtotal * order.promo_discount / 100) : (order.promo_fixed || 0))
+      : 0
+    const delivery = order.delivery_cost || 0
+
+    let calcHtml = '<div class="calc-row"><span>Товары ('+items.length+' шт.)</span><span>'+subtotal+' ₽</span></div>'
+    if (hasPromo) {
+      calcHtml += '<div class="calc-row promo"><span>🏷 '+order.promo_code+'</span><span>−'+promoDiscount+' ₽</span></div>'
     }
-
-    async function loadOrders() {
-      const res = await fetch(`${API}/api/orders`)
-      const orders = await res.json()
-      const tbody = document.getElementById('orders-body')
-      if (orders.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="8" class="empty">Заказов пока нет</td></tr>'
-        return
-      }
-      tbody.innerHTML = orders.map(o => {
-        const items = JSON.parse(o.items).map(i => `${i.name} (${i.size})`).join(', ')
-        return `<tr>
-          <td>${o.id}</td>
-          <td>${new Date(o.created_at).toLocaleString('ru')}</td>
-          <td>${o.name}</td>
-          <td>${o.phone}</td>
-          <td>${o.address}</td>
-          <td>${items}</td>
-          <td>${o.total} ₽</td>
-          <td><span class="status status-${o.status}">${o.status === 'new' ? 'Новый' : 'Выполнен'}</span></td>
-        </tr>`
-      }).join('')
+    if (delivery) {
+      calcHtml += '<div class="calc-row"><span>Доставка</span><span>'+delivery+' ₽</span></div>'
+    } else {
+      calcHtml += '<div class="calc-row"><span>Доставка</span><span style="color:#555">не указана</span></div>'
     }
+    calcHtml += '<div class="calc-row total"><span>Итого</span><span>'+order.total+' ₽</span></div>'
 
-    async function loadProducts() {
-      const res = await fetch(`${API}/api/products`)
-      const products = await res.json()
-      const tbody = document.getElementById('products-body')
-      tbody.innerHTML = products.map(p => `<tr>
-        <td>${p.id}</td>
-        <td>${p.name}</td>
-        <td>${p.price} ₽</td>
-        <td>${p.color || '—'}</td>
-        <td>${p.sizes || '—'}</td>
-        <td><button class="btn btn-danger" onclick="deleteProduct(${p.id})">Удалить</button></td>
-      </tr>`).join('')
-    }
+    // Кнопка написать
+    const msgBtn = order.vk_id
+      ? '<button class="btn btn-ghost" style="padding:3px 7px;font-size:14px;line-height:1" title="Написать покупателю" onclick="event.stopPropagation();window.open(\'https://vk.com/im?sel='+order.vk_id+'\',\'_blank\')">✉️</button>'
+      : ''
 
-    async function addProduct() {
-      const name = document.getElementById('p-name').value
-      const price = document.getElementById('p-price').value
-      const color = document.getElementById('p-color').value
-      const sizes = document.getElementById('p-sizes').value
-      const description = document.getElementById('p-description').value
-      if (!name || !price) { alert('Заполните название и цену!'); return }
-      await fetch(`${API}/api/products`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, price: parseInt(price), color, sizes, description })
-      })
-      document.getElementById('p-name').value = ''
-      document.getElementById('p-price').value = ''
-      document.getElementById('p-color').value = ''
-      document.getElementById('p-sizes').value = ''
-      document.getElementById('p-description').value = ''
-      loadProducts()
-    }
+    const detailRow = document.createElement('tr')
+    detailRow.className = 'detail-row'
+    detailRow.id = 'detail-'+order.id
 
-    async function deleteProduct(id) {
-      if (!confirm('Удалить товар?')) return
-      await fetch(`${API}/api/products/${id}`, { method: 'DELETE' })
-      loadProducts()
-    }
+    const html =
+      '<td colspan="7" style="padding:0 0 4px 0">'+
+      '<div class="detail-box">'+
+        '<div style="display:grid;grid-template-columns:1fr 2fr 1fr 0.5fr;min-height:200px">'+
 
-    async function importExcel() {
-      const file = document.getElementById('excel-file').files[0]
-      if (!file) { alert('Выберите файл!'); return }
-      const data = await file.arrayBuffer()
-      const workbook = XLSX.read(data)
-      const sheet = workbook.Sheets[workbook.SheetNames[0]]
-      const rows = XLSX.utils.sheet_to_json(sheet, { header: 1 })
-      let count = 0
-      for (const row of rows) {
-        if (!row[0] || !row[1]) continue
-        await fetch(`${API}/api/products`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            name: row[0], price: parseInt(row[1]), color: row[2] || '',
-            sizes: row[3] || '', description: row[4] || ''
-          })
-        })
-        count++
-      }
-      alert(`Загружено товаров: ${count}`)
-      loadProducts()
-    }
+          // Колонка 1: покупатель + доставка
+          '<div style="border-right:1px solid #2a2a2a;display:flex;flex-direction:column">'+
+            '<div style="padding:14px;border-bottom:1px solid #2a2a2a;flex:1">'+
+              '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">'+
+                '<div class="col-label" style="margin-bottom:0">Покупатель</div>'+
+                msgBtn+
+              '</div>'+
+              '<div class="field-label">Дата заказа</div><div class="field-value">'+date+'</div>'+
+              '<div class="field-label">ФИО</div><div class="field-value">'+vkLink+'</div>'+
+              '<div class="field-label">Телефон</div><div class="field-value">'+(order.phone||'—')+'</div>'+
+              '<div class="field-label">VK ID</div><div class="field-value">'+(order.vk_id ? '<a href="https://vk.com/id'+order.vk_id+'" target="_blank">'+order.vk_id+'</a>' : '—')+'</div>'+
+            '</div>'+
+            '<div style="padding:14px">'+
+              '<div class="col-label">Доставка</div>'+
+              '<div class="field-label">Город</div><div class="field-value">'+(order.delivery_city||'—')+'</div>'+
+              '<div class="field-label">Пункт выдачи</div><div class="field-value">'+(order.delivery_pvz||'—')+'</div>'+
+              '<div class="field-label">Тариф</div><div class="field-value">'+(order.delivery_type||'—')+'</div>'+
+            '</div>'+
+          '</div>'+
 
-    async function loadPromos() {
-      const res = await fetch(`${API}/api/promocodes`)
-      const promos = await res.json()
-      const tbody = document.getElementById('promos-body')
-      if (promos.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="4" class="empty">Промокодов пока нет</td></tr>'
-        return
-      }
-      tbody.innerHTML = promos.map(p => `<tr>
-        <td><b>${p.code}</b></td>
-        <td>${p.discount}%</td>
-        <td>${p.active ? '✅' : '❌'}</td>
-        <td><button class="btn btn-danger" onclick="deletePromo(${p.id})">Удалить</button></td>
-      </tr>`).join('')
-    }
+          // Колонка 2: состав заказа
+          '<div style="padding:14px;border-right:1px solid #2a2a2a">'+
+            '<div class="col-label">Состав заказа</div>'+
+            itemsHtml+
+          '</div>'+
 
-    async function addPromo() {
-      const code = document.getElementById('promo-code').value.toUpperCase()
-      const discount = document.getElementById('promo-discount').value
-      if (!code || !discount) { alert('Заполните код и скидку!'); return }
-      await fetch(`${API}/api/promocodes`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code, discount: parseInt(discount) })
-      })
-      document.getElementById('promo-code').value = ''
-      document.getElementById('promo-discount').value = ''
-      loadPromos()
-    }
+          // Колонка 3: расчёт
+          '<div style="padding:14px;border-right:1px solid #2a2a2a">'+
+            '<div class="col-label">Расчёт</div>'+
+            calcHtml+
+          '</div>'+
 
-    async function deletePromo(id) {
-      if (!confirm('Удалить промокод?')) return
-      await fetch(`${API}/api/promocodes/${id}`, { method: 'DELETE' })
-      loadPromos()
-    }
+          // Колонка 4: статус и кнопки
+          '<div style="padding:14px">'+
+            '<div class="col-label">Действия</div>'+
+            '<div class="field-label" style="margin-bottom:4px">Статус</div>'+
+            '<select class="status-select" id="status-select-'+order.id+'">'+
+              Object.entries(statusLabels).map(function(e){ return '<option value="'+e[0]+'"'+(status===e[0]?' selected':'')+'>'+e[1]+'</option>' }).join('')+
+            '</select>'+
+            '<button class="btn btn-primary btn-block" onclick="updateStatus('+order.id+')">✓ Обновить</button>'+
+            '<hr class="divider">'+
+            '<button class="btn btn-ghost btn-block" onclick="alert(\'СДЭК — скоро!\')">📦 В СДЭК</button>'+
+            '<button class="btn btn-ghost btn-block" onclick="alert(\'СДЭК — скоро!\')">🖨 Накладная</button>'+
+            '<button class="btn btn-ghost btn-block" onclick="alert(\'СДЭК — скоро!\')">🏷 Этикетка</button>'+
+          '</div>'+
 
-    loadOrders()
-    loadProducts()
-    loadPromos()
-  </script>
+        '</div>'+
+        '<div class="detail-footer">'+
+          '<span style="color:#555;font-size:12px">Заказ #'+order.id+'</span>'+
+          '<div class="detail-footer-right">'+
+            '<button class="btn btn-warn" onclick="deletePersonal('+order.id+')">🗑 Удалить персданные</button>'+
+            '<button class="btn btn-danger" onclick="deleteOrder('+order.id+')">✕ Удалить заказ</button>'+
+          '</div>'+
+        '</div>'+
+      '</div></td>'
+
+    detailRow.innerHTML = html
+    tbody.appendChild(detailRow)
+  })
+}
+
+function toggleDetail(id) { document.getElementById('detail-'+id).classList.toggle('open') }
+
+async function updateStatus(id) {
+  const status = document.getElementById('status-select-'+id).value
+  await fetch(API+'/api/orders/'+id+'/status', { method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify({status}) })
+  loadOrders()
+}
+
+function deleteOrder(id) { pendingOrderId=id; document.getElementById('modal-delete-order').classList.add('open') }
+async function confirmDeleteOrder() {
+  await fetch(API+'/api/orders/'+pendingOrderId, { method:'DELETE' })
+  closeModal('modal-delete-order'); loadOrders()
+}
+function deletePersonal(id) { pendingOrderId=id; document.getElementById('modal-delete-personal').classList.add('open') }
+async function confirmDeletePersonal() {
+  await fetch(API+'/api/orders/'+pendingOrderId+'/personal', { method:'DELETE' })
+  closeModal('modal-delete-personal'); loadOrders()
+}
+function closeModal(id) { document.getElementById(id).classList.remove('open'); pendingOrderId=null }
+
+async function loadProducts() {
+  const res = await fetch(API+'/api/products')
+  const products = await res.json()
+  const tbody = document.getElementById('products-body')
+  tbody.innerHTML = ''
+  products.forEach(function(p) {
+    const tr = document.createElement('tr')
+    tr.innerHTML = '<td>'+p.art+'</td><td>'+p.name+'</td><td>'+p.price+' ₽</td><td style="font-size:11px;color:#888">'+p.sizes+'</td><td><button class="btn btn-danger" onclick="deleteProduct('+p.id+')">✕</button></td>'
+    tbody.appendChild(tr)
+  })
+}
+
+async function addProduct() {
+  const body = {
+    art: document.getElementById('p-art').value,
+    name: document.getElementById('p-name').value,
+    price: +document.getElementById('p-price').value,
+    description: document.getElementById('p-desc').value,
+    images: document.getElementById('p-images').value,
+    sizes: document.getElementById('p-sizes').value,
+    color: document.getElementById('p-color').value
+  }
+  await fetch(API+'/api/products', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) })
+  document.getElementById('add-product-form').style.display='none'
+  loadProducts()
+}
+
+async function deleteProduct(id) {
+  if (!confirm('Удалить товар?')) return
+  await fetch(API+'/api/products/'+id, { method:'DELETE' })
+  loadProducts()
+}
+
+async function loadPromos() {
+  const res = await fetch(API+'/api/promocodes')
+  const promos = await res.json()
+  const tbody = document.getElementById('promos-body')
+  tbody.innerHTML = ''
+  if (!promos.length) { tbody.innerHTML='<tr><td colspan="7" class="empty">Промокодов нет</td></tr>'; return }
+  promos.forEach(function(p) {
+    const typeLabel = p.type==='fixed' ? p.discount+' ₽' : p.discount+'%'
+    const from = p.valid_from ? new Date(p.valid_from).toLocaleDateString('ru') : '∞'
+    const to = p.valid_to ? new Date(p.valid_to).toLocaleDateString('ru') : '∞'
+    const uses = p.max_uses ? (p.used_count||0)+' / '+p.max_uses : (p.used_count||0)+' / ∞'
+    const tr = document.createElement('tr')
+    tr.innerHTML =
+      '<td><strong>'+p.code+'</strong></td>'+
+      '<td>'+(p.type==='fixed'?'Фикс.':'%')+'</td>'+
+      '<td>'+typeLabel+'</td>'+
+      '<td style="font-size:12px;color:#888">'+from+' — '+to+'</td>'+
+      '<td style="font-size:12px">'+uses+'</td>'+
+      '<td>'+(p.active?'✅':'❌')+'</td>'+
+      '<td><button class="btn btn-danger" onclick="deletePromo('+p.id+')">✕</button></td>'
+    tbody.appendChild(tr)
+  })
+}
+
+async function addPromo() {
+  const code = document.getElementById('promo-code').value.trim().toUpperCase()
+  const discount = Math.abs(+document.getElementById('promo-discount').value)
+  const type = document.getElementById('promo-type').value
+  const maxUsesVal = document.getElementById('promo-maxuses').value
+  const max_uses = maxUsesVal ? Math.abs(+maxUsesVal) : null
+  const valid_from = document.getElementById('promo-from').value || null
+  const valid_to = document.getElementById('promo-to').value || null
+  if (!code || !discount) return
+  await fetch(API+'/api/promocodes', {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({code,discount,type,max_uses,valid_from,valid_to})
+  })
+  document.getElementById('promo-code').value=''
+  document.getElementById('promo-discount').value=''
+  document.getElementById('promo-maxuses').value=''
+  document.getElementById('promo-from').value=''
+  document.getElementById('promo-to').value=''
+  loadPromos()
+}
+
+async function deletePromo(id) {
+  await fetch(API+'/api/promocodes/'+id, { method:'DELETE' })
+  loadPromos()
+}
+
+loadOrders()
+</script>
 </body>
 </html>
