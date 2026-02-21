@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>METKA SHOP — Админка</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: sans-serif; background: #1a1a1a; color: #fff; }
+    .header { background: #111; padding: 16px 24px; border-bottom: 1px solid #333; }
+    .header h1 { font-size: 20px; }
+    .tabs { display: flex; background: #111; border-bottom: 1px solid #333; }
+    .tab { padding: 14px 24px; cursor: pointer; color: #888; font-size: 14px; border-bottom: 2px solid transparent; }
+    .tab:hover { color: #fff; }
+    .tab.active { color: #fff; border-bottom: 2px solid #4a90e2; }
+    .content { padding: 24px; display: none; }
+    .content.active { display: block; }
+    table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
+    th, td { padding: 10px; border: 1px solid #333; text-align: left; font-size: 14px; }
+    th { background: #2a2a2a; }
+    tr:hover { background: #222; }
+    .form { background: #2a2a2a; padding: 20px; border-radius: 8px; max-width: 500px; margin-bottom: 24px; }
+    .form input { width: 100%; padding: 8px; margin: 6px 0 12px; background: #333; border: 1px solid #444; color: #fff; border-radius: 4px; }
+    .form label { font-size: 13px; color: #aaa; }
+    .btn { padding: 10px 20px; background: #4a90e2; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; margin-right: 8px; }
+    .btn:hover { background: #357abd; }
+    .btn-danger { background: #e24a4a; }
+    .btn-danger:hover { background: #bd3535; }
+    .btn-green { background: #4ae24a; color: #000; }
+    .btn-green:hover { background: #35bd35; }
+    .status { padding: 4px 8px; border-radius: 4px; font-size: 12px; }
+    .status-new { background: #4a90e2; }
+    .status-done { background: #4ae24a; color: #000; }
+    .hint { font-size: 12px; color: #888; margin-bottom: 16px; }
+    .empty { text-align: center; color: #888; padding: 40px; }
+  </style>
+</head>
+<body>
+  <div class="header"><h1>METKA SHOP — Админка</h1></div>
+
+  <div class="tabs">
+    <div class="tab active" onclick="switchTab('orders')">Заказы</div>
+    <div class="tab" onclick="switchTab('products')">Товары</div>
+    <div class="tab" onclick="switchTab('promocodes')">Промокоды</div>
+  </div>
+
+  <!-- ЗАКАЗЫ -->
+  <div id="tab-orders" class="content active">
+    <table>
+      <thead>
+        <tr>
+          <th>#</th><th>Дата</th><th>Имя</th><th>Телефон</th><th>Адрес</th><th>Товары</th><th>Сумма</th><th>Статус</th>
+        </tr>
+      </thead>
+      <tbody id="orders-body"></tbody>
+    </table>
+  </div>
+
+  <!-- ТОВАРЫ -->
+  <div id="tab-products" class="content">
+    <div class="form">
+      <h3 style="margin-bottom:16px">Добавить товар</h3>
+      <label>Название</label>
+      <input id="p-name" placeholder="Футболка METKA..." />
+      <label>Цена (₽)</label>
+      <input id="p-price" type="number" placeholder="1500" />
+      <label>Цвет</label>
+      <input id="p-color" placeholder="Чёрная" />
+      <label>Размеры (через запятую)</label>
+      <input id="p-sizes" placeholder="S,M,L,XL" />
+      <label>Описание</label>
+      <input id="p-description" placeholder="Описание товара..." />
+      <br>
+      <button class="btn" onclick="addProduct()">Добавить</button>
+    </div>
+
+    <div class="form">
+      <h3 style="margin-bottom:8px">Загрузить из Excel</h3>
+      <p class="hint">Колонки в файле: Название | Цена | Цвет | Размеры | Описание</p>
+      <input type="file" id="excel-file" accept=".xlsx,.xls" style="margin-bottom:12px" />
+      <button class="btn btn-green" onclick="importExcel()">Загрузить</button>
+    </div>
+
+    <table>
+      <thead>
+        <tr><th>#</th><th>Название</th><th>Цена</th><th>Цвет</th><th>Размеры</th><th>Действия</th></tr>
+      </thead>
+      <tbody id="products-body"></tbody>
+    </table>
+  </div>
+
+  <!-- ПРОМОКОДЫ -->
+  <div id="tab-promocodes" class="content">
+    <div class="form">
+      <h3 style="margin-bottom:16px">Создать промокод</h3>
+      <label>Код</label>
+      <input id="promo-code" placeholder="SUMMER20" />
+      <label>Скидка (%)</label>
+      <input id="promo-discount" type="number" placeholder="20" />
+      <br>
+      <button class="btn" onclick="addPromo()">Создать</button>
+    </div>
+    <table>
+      <thead>
+        <tr><th>Код</th><th>Скидка</th><th>Активен</th><th>Действия</th></tr>
+      </thead>
+      <tbody id="promos-body"></tbody>
+    </table>
+  </div>
+
+  <script>
+    const API = 'http://localhost:3001'
+
+    function switchTab(name) {
+      document.querySelectorAll('.tab').forEach((t, i) => {
+        t.classList.toggle('active', ['orders','products','promocodes'][i] === name)
+      })
+      document.querySelectorAll('.content').forEach(c => c.classList.remove('active'))
+      document.getElementById(`tab-${name}`).classList.add('active')
+    }
+
+    async function loadOrders() {
+      const res = await fetch(`${API}/api/orders`)
+      const orders = await res.json()
+      const tbody = document.getElementById('orders-body')
+      if (orders.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="8" class="empty">Заказов пока нет</td></tr>'
+        return
+      }
+      tbody.innerHTML = orders.map(o => {
+        const items = JSON.parse(o.items).map(i => `${i.name} (${i.size})`).join(', ')
+        return `<tr>
+          <td>${o.id}</td>
+          <td>${new Date(o.created_at).toLocaleString('ru')}</td>
+          <td>${o.name}</td>
+          <td>${o.phone}</td>
+          <td>${o.address}</td>
+          <td>${items}</td>
+          <td>${o.total} ₽</td>
+          <td><span class="status status-${o.status}">${o.status === 'new' ? 'Новый' : 'Выполнен'}</span></td>
+        </tr>`
+      }).join('')
+    }
+
+    async function loadProducts() {
+      const res = await fetch(`${API}/api/products`)
+      const products = await res.json()
+      const tbody = document.getElementById('products-body')
+      tbody.innerHTML = products.map(p => `<tr>
+        <td>${p.id}</td>
+        <td>${p.name}</td>
+        <td>${p.price} ₽</td>
+        <td>${p.color || '—'}</td>
+        <td>${p.sizes || '—'}</td>
+        <td><button class="btn btn-danger" onclick="deleteProduct(${p.id})">Удалить</button></td>
+      </tr>`).join('')
+    }
+
+    async function addProduct() {
+      const name = document.getElementById('p-name').value
+      const price = document.getElementById('p-price').value
+      const color = document.getElementById('p-color').value
+      const sizes = document.getElementById('p-sizes').value
+      const description = document.getElementById('p-description').value
+      if (!name || !price) { alert('Заполните название и цену!'); return }
+      await fetch(`${API}/api/products`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, price: parseInt(price), color, sizes, description })
+      })
+      document.getElementById('p-name').value = ''
+      document.getElementById('p-price').value = ''
+      document.getElementById('p-color').value = ''
+      document.getElementById('p-sizes').value = ''
+      document.getElementById('p-description').value = ''
+      loadProducts()
+    }
+
+    async function deleteProduct(id) {
+      if (!confirm('Удалить товар?')) return
+      await fetch(`${API}/api/products/${id}`, { method: 'DELETE' })
+      loadProducts()
+    }
+
+    async function importExcel() {
+      const file = document.getElementById('excel-file').files[0]
+      if (!file) { alert('Выберите файл!'); return }
+      const data = await file.arrayBuffer()
+      const workbook = XLSX.read(data)
+      const sheet = workbook.Sheets[workbook.SheetNames[0]]
+      const rows = XLSX.utils.sheet_to_json(sheet, { header: 1 })
+      let count = 0
+      for (const row of rows) {
+        if (!row[0] || !row[1]) continue
+        await fetch(`${API}/api/products`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: row[0], price: parseInt(row[1]), color: row[2] || '',
+            sizes: row[3] || '', description: row[4] || ''
+          })
+        })
+        count++
+      }
+      alert(`Загружено товаров: ${count}`)
+      loadProducts()
+    }
+
+    async function loadPromos() {
+      const res = await fetch(`${API}/api/promocodes`)
+      const promos = await res.json()
+      const tbody = document.getElementById('promos-body')
+      if (promos.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="4" class="empty">Промокодов пока нет</td></tr>'
+        return
+      }
+      tbody.innerHTML = promos.map(p => `<tr>
+        <td><b>${p.code}</b></td>
+        <td>${p.discount}%</td>
+        <td>${p.active ? '✅' : '❌'}</td>
+        <td><button class="btn btn-danger" onclick="deletePromo(${p.id})">Удалить</button></td>
+      </tr>`).join('')
+    }
+
+    async function addPromo() {
+      const code = document.getElementById('promo-code').value.toUpperCase()
+      const discount = document.getElementById('promo-discount').value
+      if (!code || !discount) { alert('Заполните код и скидку!'); return }
+      await fetch(`${API}/api/promocodes`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code, discount: parseInt(discount) })
+      })
+      document.getElementById('promo-code').value = ''
+      document.getElementById('promo-discount').value = ''
+      loadPromos()
+    }
+
+    async function deletePromo(id) {
+      if (!confirm('Удалить промокод?')) return
+      await fetch(`${API}/api/promocodes/${id}`, { method: 'DELETE' })
+      loadPromos()
+    }
+
+    loadOrders()
+    loadProducts()
+    loadPromos()
+  </script>
+</body>
+</html>
