@@ -7,8 +7,9 @@ const app = express()
 
 app.use(cors())
 app.use(express.json())
-app.use(express.static(__dirname))
+app.use(express.static(path.join(__dirname, '../dist')))
 app.use('/img', express.static(path.join(__dirname, '../img')))
+app.use('/admin.html', express.static(path.join(__dirname, 'admin.html')))
 
 // Инициализация sql.js
 const initSqlJs = require('sql.js')
@@ -19,7 +20,6 @@ let db = null
 async function initDB() {
   const SQL = await initSqlJs()
 
-  // Загружаем существующую базу или создаём новую
   if (fs.existsSync(DB_PATH)) {
     const data = JSON.parse(fs.readFileSync(DB_PATH, 'utf8'))
     db = new SQL.Database(Buffer.from(data, 'base64'))
@@ -27,7 +27,6 @@ async function initDB() {
     db = new SQL.Database()
   }
 
-  // Создаём таблицы
   db.run(`
     CREATE TABLE IF NOT EXISTS products (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -85,21 +84,17 @@ function saveDB() {
   fs.writeFileSync(DB_PATH, JSON.stringify(data), 'utf8')
 }
 
-// Хелперы для работы с БД
 function all(sql, params = []) {
   const stmt = db.prepare(sql)
   stmt.bind(params)
   const rows = []
-  while (stmt.step()) {
-    rows.push(stmt.getAsObject())
-  }
+  while (stmt.step()) rows.push(stmt.getAsObject())
   stmt.free()
   return rows
 }
 
 function get(sql, params = []) {
-  const rows = all(sql, params)
-  return rows[0] || null
+  return all(sql, params)[0] || null
 }
 
 function run(sql, params = []) {
@@ -204,10 +199,16 @@ app.delete('/api/promocodes/:id', (req, res) => {
   res.json({ ok: true })
 })
 
+// Все остальные запросы -> index.html (SPA)
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname, '../dist/index.html'))
+})
+
 // Запуск
 initDB().then(() => {
-  app.listen(3001, () => {
-    console.log('Сервер запущен на http://localhost:3001')
+  const PORT = process.env.PORT || 3001
+  app.listen(PORT, () => {
+    console.log('Сервер запущен на порту ' + PORT)
   })
 }).catch(err => {
   console.error('Ошибка инициализации БД:', err)
