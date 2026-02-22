@@ -4,7 +4,9 @@ import { Icon28ShoppingCartOutline, Icon28FavoriteOutline, Icon28Favorite, Icon2
 import bridge from '@vkontakte/vk-bridge'
 import '@vkontakte/vkui/dist/vkui.css'
 
-const API = import.meta.env.VITE_API_URL || 'http://192.168.1.2:3001'
+const API = typeof window !== 'undefined' && window.location.hostname !== 'localhost' 
+  ? '' 
+  : 'http://192.168.1.2:3001'
 
 function Lightbox({ src, onClose }) {
   return (
@@ -200,12 +202,12 @@ function App() {
   return (
     <ConfigProvider colorScheme="dark">
       <AdaptivityProvider viewWidth={ViewWidth.MOBILE}>
-        <AppRoot>
+        <AppRoot style={{ maxWidth: '600px', margin: '0 auto', minHeight: '100vh' }}>
           <View activePanel={activePanel}>
 
             <Panel id="splash">
-              <div onClick={() => setActivePanel('catalog')} style={{ height: '100vh', cursor: 'pointer', overflow: 'hidden', background: '#111' }}>
-                <img src={`${API}/img/cover/cover.jpg`} alt="METKA SHOP" style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'center', display: 'block' }} />
+              <div onClick={() => setActivePanel('catalog')} style={{ height: '100vh', cursor: 'pointer', overflow: 'hidden', background: '#111', display: 'flex', justifyContent: 'center' }}>
+                <img src={`${API}/img/cover/cover.jpg`} alt="METKA SHOP" style={{ height: '100%', width: 'auto', maxWidth: '100%', objectFit: 'cover', objectPosition: 'center', display: 'block' }} />
               </div>
             </Panel>
 
