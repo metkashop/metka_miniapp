@@ -202,7 +202,7 @@ function App() {
   return (
     <ConfigProvider colorScheme="dark">
       <AdaptivityProvider viewWidth={ViewWidth.MOBILE}>
-        <AppRoot>
+        <AppRoot style={{ maxWidth: '600px', margin: '0 auto', minHeight: '100vh' }}>
           <View activePanel={activePanel}>
 
             <Panel id="splash">
