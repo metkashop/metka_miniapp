@@ -23,7 +23,7 @@ jobs:
         with:
           host: 176.119.147.38
           username: root
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          password: ${{ secrets.SSH_PASSWORD }}
           script: |
             cd /var/www
             git pull origin master
