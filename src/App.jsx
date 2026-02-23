@@ -43,7 +43,7 @@ function ProductDetail({ product, onAdd, favorites, toggleFavorite }) {
     <div style={{ overflowY: 'auto', paddingBottom: '24px', width: '100%' }}>
       {lightbox && <Lightbox src={lightbox} onClose={() => setLightbox(null)} />}
       <div style={{ position: 'relative', width: '100%', aspectRatio: '3/4', maxHeight: '450px', overflow: 'hidden', background: '#2a2a2a', cursor: 'zoom-in' }} onClick={() => setLightbox(`${API}/${images[currentImg]}`)} onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
-        <img src={`${API}/${images[currentImg]}`} alt={product.name} style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+        <img src={`${API}/${images[currentImg]}`} alt={product.name} style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }} />
         {images.length > 1 && (
           <>
             <button onClick={e => { e.stopPropagation(); prevImg() }} style={{ position: 'absolute', left: '8px', top: '50%', transform: 'translateY(-50%)', background: 'rgba(0,0,0,0.5)', color: '#fff', border: 'none', borderRadius: '50%', width: '32px', height: '32px', cursor: 'pointer', fontSize: '18px' }}>‹</button>
