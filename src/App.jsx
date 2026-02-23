@@ -99,6 +99,19 @@ function App() {
   const [promoError, setPromoError] = useState('')
   const [promoLoading, setPromoLoading] = useState(false)
 
+  // СДЭК
+  const [citySearch, setCitySearch] = useState('')
+  const [cityResults, setCityResults] = useState([])
+  const [selectedCity, setSelectedCity] = useState(null)
+  const [pvzList, setPvzList] = useState([])
+  const [pvzLoading, setPvzLoading] = useState(false)
+  const [selectedPvz, setSelectedPvz] = useState(null)
+  const [deliveryOptions, setDeliveryOptions] = useState([])
+  const [deliveryLoading, setDeliveryLoading] = useState(false)
+  const [selectedDelivery, setSelectedDelivery] = useState(null)
+  const [checkoutStep, setCheckoutStep] = useState(1) // 1=город/пвз, 2=данные
+  const [showCancelDialog, setShowCancelDialog] = useState(false)
+
   useEffect(() => {
     bridge.send('VKWebAppInit').catch(() => {})
     bridge.send('VKWebAppGetUserInfo').then(user => {
@@ -155,22 +168,88 @@ function App() {
 
   const removePromo = () => { setPromoApplied(null); setPromoCode(''); setPromoError('') }
 
+  // СДЭК функции
+  const searchCity = async (q) => {
+    setCitySearch(q)
+    if (q.length < 2) { setCityResults([]); return }
+    try {
+      const res = await fetch(`${API}/api/cdek/cities?q=${encodeURIComponent(q)}`)
+      setCityResults(await res.json())
+    } catch {}
+  }
+
+  const selectCity = async (city) => {
+    setSelectedCity(city)
+    setCitySearch(city.name)
+    setCityResults([])
+    setSelectedPvz(null)
+    setDeliveryOptions([])
+    setSelectedDelivery(null)
+    setPvzLoading(true)
+    try {
+      const res = await fetch(`${API}/api/cdek/pvz?city_code=${city.code}`)
+      setPvzList(await res.json())
+    } catch {}
+    setPvzLoading(false)
+  }
+
+  const selectPvz = async (pvz) => {
+    setSelectedPvz(pvz)
+    setDeliveryOptions([])
+    setSelectedDelivery(null)
+    setDeliveryLoading(true)
+    try {
+      const res = await fetch(`${API}/api/cdek/calculate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          city_code: selectedCity.code,
+          pvz_code: pvz.code,
+          items: cart.map(i => ({ price: i.price, weight: i.weight || 300, qty: 1 }))
+        })
+      })
+      setDeliveryOptions(await res.json())
+    } catch {}
+    setDeliveryLoading(false)
+  }
+
+  const tariffName = (code) => ({
+    136: 'Обычная ПВЗ', 234: 'Экономичная ПВЗ', 368: 'Обычная Постамат', 378: 'Экономичная Постамат'
+  })[code] || `Тариф ${code}`
+
+  const cancelOrder = (clearCart) => {
+    if (clearCart) setCart([])
+    setShowCancelDialog(false)
+    setCheckoutStep(1)
+    setSelectedCity(null)
+    setCitySearch('')
+    setSelectedPvz(null)
+    setDeliveryOptions([])
+    setSelectedDelivery(null)
+    setActivePanel('catalog')
+  }
+
   const submitOrder = () => {
     if (!form.firstName || !form.lastName || !form.phone) { setSnackbar('Заполните все поля!'); return }
     if (!agreePolicy) { setSnackbar('Необходимо согласие с политикой обработки данных!'); return }
+    if (!selectedPvz || !selectedDelivery) { setSnackbar('Выберите пункт выдачи и тариф доставки!'); return }
     setSubmitting(true)
     const name = `${form.lastName} ${form.firstName}`
     fetch(`${API}/api/orders`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        items: cart, total, name,
+        items: cart, total: total + selectedDelivery.cost, name,
         phone: form.phone,
-        address: 'СДЭК',
+        address: selectedPvz.address,
         vk_id: vkUser?.id || null,
         promo_code: promoApplied ? promoCode : null,
         promo_discount: promoApplied?.type === 'percent' ? promoApplied.discount : null,
         promo_fixed: promoApplied?.type === 'fixed' ? promoApplied.discount : null,
+        delivery_city: selectedCity?.name,
+        delivery_pvz: selectedPvz?.code,
+        delivery_type: String(selectedDelivery?.tariff_code),
+        delivery_cost: selectedDelivery?.cost,
       })
     })
       .then(res => res.json())
@@ -180,6 +259,12 @@ function App() {
         setAgreePolicy(false)
         setPromoApplied(null)
         setPromoCode('')
+        setCheckoutStep(1)
+        setSelectedCity(null)
+        setCitySearch('')
+        setSelectedPvz(null)
+        setDeliveryOptions([])
+        setSelectedDelivery(null)
         setActivePanel('catalog')
         setSnackbar(`Заказ №${data.id} оформлен! Мы свяжемся с вами.`)
         setSubmitting(false)
@@ -323,55 +408,173 @@ function App() {
             <Panel id="checkout">
               <PanelHeader before={<PanelHeaderBack onClick={() => setActivePanel('cart')} />}>Оформление</PanelHeader>
               <div style={{ padding: '16px' }}>
-                {vkUser && (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px', padding: '12px', background: '#2a2a2a', borderRadius: '8px' }}>
-                    {vkUser.photo_100 && <img src={vkUser.photo_100} alt="" style={{ width: '40px', height: '40px', borderRadius: '50%' }} />}
-                    <Text>{vkUser.first_name} {vkUser.last_name}</Text>
+
+                {/* Диалог отмены */}
+                {showCancelDialog && (
+                  <div style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', background: 'rgba(0,0,0,0.7)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px', boxSizing: 'border-box' }}>
+                    <div style={{ background: '#1a1a1a', borderRadius: '12px', padding: '24px', maxWidth: '320px', width: '100%' }}>
+                      <Title level="3" style={{ marginBottom: '12px' }}>Отменить заказ?</Title>
+                      <Text style={{ color: '#aaa', marginBottom: '20px', display: 'block' }}>Удалить товары из корзины?</Text>
+                      <div style={{ display: 'flex', gap: '8px' }}>
+                        <Button size="m" stretched appearance="negative" onClick={() => cancelOrder(true)}>Да, удалить</Button>
+                        <Button size="m" stretched appearance="neutral" onClick={() => cancelOrder(false)}>Нет, оставить</Button>
+                      </div>
+                      <Button size="m" stretched appearance="overlay" style={{ marginTop: '8px' }} onClick={() => setShowCancelDialog(false)}>Продолжить оформление</Button>
+                    </div>
                   </div>
                 )}
-                <div style={{ background: '#2a1a1a', border: '1px solid #e24a4a44', borderRadius: '8px', padding: '12px', marginBottom: '16px' }}>
-                  <Text style={{ color: '#ffaa44', fontSize: '13px' }}>
-                    ⚠️ Укажите настоящие данные — они нужны для получения посылки в пункте СДЭК. Неверные данные = потерянный заказ!
-                  </Text>
-                </div>
-                <FormItem top="Имя">
-                  <Input placeholder="Иван" value={form.firstName} onChange={e => setForm({ ...form, firstName: e.target.value })} />
-                </FormItem>
-                <FormItem top="Фамилия">
-                  <Input placeholder="Иванов" value={form.lastName} onChange={e => setForm({ ...form, lastName: e.target.value })} />
-                </FormItem>
-                <FormItem top="Телефон">
-                  <Input placeholder="+7 900 000 00 00" value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} />
-                </FormItem>
-                <div style={{ padding: '8px 0 16px' }}>
-                  <Checkbox checked={agreePolicy} onChange={e => setAgreePolicy(e.target.checked)}>
-                    <Text style={{ fontSize: '12px' }}>
-                      Я согласен с{' '}
-                      <span onClick={() => setActivePanel('policy')} style={{ color: '#5b9cf6', cursor: 'pointer' }}>
-                        политикой обработки персональных данных
-                      </span>
-                    </Text>
-                  </Checkbox>
-                </div>
-                <div style={{ borderTop: '1px solid #333', paddingTop: '12px', marginBottom: '16px' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
-                    <Text style={{ color: '#888', fontSize: '13px' }}>Товары</Text>
-                    <Text style={{ fontSize: '13px' }}>{subtotal} ₽</Text>
-                  </div>
-                  {promoApplied && (
-                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
-                      <Text style={{ color: '#44cc88', fontSize: '13px' }}>Скидка</Text>
-                      <Text style={{ color: '#44cc88', fontSize: '13px' }}>−{discount} ₽</Text>
+
+                {/* Шаг 1: Выбор города и ПВЗ */}
+                {checkoutStep === 1 && (
+                  <>
+                    <div style={{ background: '#1a1a2e', border: '1px solid #4a4aaa44', borderRadius: '8px', padding: '12px', marginBottom: '16px' }}>
+                      <Text style={{ color: '#aaaaff', fontSize: '13px' }}>📦 Шаг 1 из 2 — Выберите пункт выдачи СДЭК</Text>
                     </div>
-                  )}
-                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <Title level="3">Итого</Title>
-                    <Title level="3">{total} ₽</Title>
-                  </div>
-                </div>
-                <Button size="l" stretched loading={submitting} disabled={!agreePolicy} onClick={submitOrder}>
-                  Подтвердить заказ
-                </Button>
+
+                    <FormItem top="Город">
+                      <Input
+                        placeholder="Начните вводить название города"
+                        value={citySearch}
+                        onChange={e => searchCity(e.target.value)}
+                      />
+                    </FormItem>
+
+                    {cityResults.length > 0 && (
+                      <div style={{ background: '#1a1a1a', border: '1px solid #333', borderRadius: '8px', marginBottom: '16px', overflow: 'hidden' }}>
+                        {cityResults.map(city => (
+                          <div key={city.code} onClick={() => selectCity(city)}
+                            style={{ padding: '10px 12px', cursor: 'pointer', borderBottom: '1px solid #222' }}>
+                            <Text style={{ fontSize: '14px' }}>{city.name}</Text>
+                            {city.region && <Text style={{ fontSize: '11px', color: '#888' }}>{city.region}</Text>}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {pvzLoading && <div style={{ display: 'flex', justifyContent: 'center', padding: '20px' }}><Spinner /></div>}
+
+                    {pvzList.length > 0 && !pvzLoading && (
+                      <>
+                        <Text style={{ fontSize: '13px', color: '#888', marginBottom: '8px', display: 'block' }}>
+                          Пунктов выдачи: {pvzList.length}. Выберите удобный:
+                        </Text>
+                        <div style={{ maxHeight: '300px', overflowY: 'auto', border: '1px solid #333', borderRadius: '8px', marginBottom: '16px' }}>
+                          {pvzList.map(pvz => (
+                            <div key={pvz.code} onClick={() => selectPvz(pvz)}
+                              style={{ padding: '10px 12px', cursor: 'pointer', borderBottom: '1px solid #222', background: selectedPvz?.code === pvz.code ? '#1a3a1a' : 'transparent' }}>
+                              <Text style={{ fontSize: '13px', fontWeight: selectedPvz?.code === pvz.code ? '600' : '400' }}>{pvz.address}</Text>
+                              {pvz.work_time && <Text style={{ fontSize: '11px', color: '#888' }}>{pvz.work_time}</Text>}
+                            </div>
+                          ))}
+                        </div>
+                      </>
+                    )}
+
+                    {deliveryLoading && <div style={{ display: 'flex', justifyContent: 'center', padding: '20px' }}><Spinner /></div>}
+
+                    {deliveryOptions.length > 0 && !deliveryLoading && (
+                      <>
+                        <Text style={{ fontSize: '13px', color: '#888', marginBottom: '8px', display: 'block' }}>Выберите тариф доставки:</Text>
+                        {deliveryOptions.map(opt => (
+                          <div key={opt.tariff_code} onClick={() => setSelectedDelivery(opt)}
+                            style={{ padding: '12px', border: `1px solid ${selectedDelivery?.tariff_code === opt.tariff_code ? '#44cc88' : '#333'}`, borderRadius: '8px', marginBottom: '8px', cursor: 'pointer', background: selectedDelivery?.tariff_code === opt.tariff_code ? '#1a3a2a' : 'transparent' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                              <Text style={{ fontSize: '13px' }}>{tariffName(opt.tariff_code)}</Text>
+                              <Text style={{ fontSize: '13px', fontWeight: '600' }}>{opt.cost} ₽</Text>
+                            </div>
+                            <Text style={{ fontSize: '11px', color: '#888' }}>≈ {opt.days} дней</Text>
+                          </div>
+                        ))}
+                      </>
+                    )}
+
+                    <div style={{ display: 'flex', gap: '8px', marginTop: '16px' }}>
+                      <Button size="l" stretched
+                        disabled={!selectedDelivery}
+                        onClick={() => setCheckoutStep(2)}>
+                        Далее →
+                      </Button>
+                      <Button size="l" appearance="neutral" onClick={() => setShowCancelDialog(true)}>Отмена</Button>
+                    </div>
+                  </>
+                )}
+
+                {/* Шаг 2: Личные данные и итог */}
+                {checkoutStep === 2 && (
+                  <>
+                    <div style={{ background: '#1a2a1a', border: '1px solid #44aa4444', borderRadius: '8px', padding: '12px', marginBottom: '16px' }}>
+                      <Text style={{ color: '#88ff88', fontSize: '13px' }}>✅ ПВЗ: {selectedPvz?.address}</Text>
+                      <Text style={{ color: '#88ff88', fontSize: '13px', display: 'block', marginTop: '4px' }}>
+                        🚚 {tariffName(selectedDelivery?.tariff_code)} — {selectedDelivery?.cost} ₽, ≈{selectedDelivery?.days} дней
+                      </Text>
+                    </div>
+
+                    {vkUser && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px', padding: '12px', background: '#2a2a2a', borderRadius: '8px' }}>
+                        {vkUser.photo_100 && <img src={vkUser.photo_100} alt="" style={{ width: '40px', height: '40px', borderRadius: '50%' }} />}
+                        <Text>{vkUser.first_name} {vkUser.last_name}</Text>
+                      </div>
+                    )}
+
+                    <div style={{ background: '#2a1a1a', border: '1px solid #e24a4a44', borderRadius: '8px', padding: '12px', marginBottom: '16px' }}>
+                      <Text style={{ color: '#ffaa44', fontSize: '13px' }}>
+                        ⚠️ Укажите настоящие данные — они нужны для получения посылки в СДЭК. Неверные данные = потерянный заказ!
+                      </Text>
+                    </div>
+
+                    <FormItem top="Имя">
+                      <Input placeholder="Иван" value={form.firstName} onChange={e => setForm({ ...form, firstName: e.target.value })} />
+                    </FormItem>
+                    <FormItem top="Фамилия">
+                      <Input placeholder="Иванов" value={form.lastName} onChange={e => setForm({ ...form, lastName: e.target.value })} />
+                    </FormItem>
+                    <FormItem top="Телефон">
+                      <Input placeholder="+7 900 000 00 00" value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} />
+                    </FormItem>
+
+                    <div style={{ padding: '8px 0 16px' }}>
+                      <Checkbox checked={agreePolicy} onChange={e => setAgreePolicy(e.target.checked)}>
+                        <Text style={{ fontSize: '12px' }}>
+                          Я согласен с{' '}
+                          <span onClick={() => setActivePanel('policy')} style={{ color: '#5b9cf6', cursor: 'pointer' }}>
+                            политикой обработки персональных данных
+                          </span>
+                        </Text>
+                      </Checkbox>
+                    </div>
+
+                    <div style={{ borderTop: '1px solid #333', paddingTop: '12px', marginBottom: '16px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                        <Text style={{ color: '#888', fontSize: '13px' }}>Товары</Text>
+                        <Text style={{ fontSize: '13px' }}>{subtotal} ₽</Text>
+                      </div>
+                      {promoApplied && (
+                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                          <Text style={{ color: '#44cc88', fontSize: '13px' }}>Скидка</Text>
+                          <Text style={{ color: '#44cc88', fontSize: '13px' }}>−{discount} ₽</Text>
+                        </div>
+                      )}
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                        <Text style={{ color: '#888', fontSize: '13px' }}>Доставка</Text>
+                        <Text style={{ fontSize: '13px' }}>{selectedDelivery?.cost} ₽</Text>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '8px' }}>
+                        <Title level="3">Итого</Title>
+                        <Title level="3">{total + (selectedDelivery?.cost || 0)} ₽</Title>
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'flex', gap: '8px' }}>
+                      <Button size="l" stretched loading={submitting} disabled={!agreePolicy} onClick={submitOrder}>
+                        Подтвердить заказ
+                      </Button>
+                      <Button size="l" appearance="neutral" onClick={() => setCheckoutStep(1)}>← Назад</Button>
+                    </div>
+                    <Button size="m" stretched appearance="negative" style={{ marginTop: '8px' }} onClick={() => setShowCancelDialog(true)}>
+                      Отменить заказ
+                    </Button>
+                  </>
+                )}
               </div>
             </Panel>
 
