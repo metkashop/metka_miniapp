@@ -169,13 +169,24 @@ function App() {
   const removePromo = () => { setPromoApplied(null); setPromoCode(''); setPromoError('') }
 
   // СДЭК функции
-  const searchCity = async (q) => {
+  const searchCity = (q) => {
     setCitySearch(q)
     if (q.length < 2) { setCityResults([]); return }
-    try {
-      const res = await fetch(`${API}/api/cdek/cities?q=${encodeURIComponent(q)}`)
-      setCityResults(await res.json())
-    } catch {}
+    const callbackName = 'cdekCallback_' + Date.now()
+    window[callbackName] = (data) => {
+      const cities = (data || []).map(c => ({
+        code: c.id,
+        name: c.name,
+        region: c.region || ''
+      }))
+      setCityResults(cities)
+      delete window[callbackName]
+      document.getElementById(callbackName)?.remove()
+    }
+    const script = document.createElement('script')
+    script.id = callbackName
+    script.src = `https://api.cdek.ru/city/getListByTerm/jsonp.php?q=${encodeURIComponent(q)}&callback=${callbackName}`
+    document.head.appendChild(script)
   }
 
   const selectCity = async (city) => {
