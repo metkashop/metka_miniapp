@@ -202,7 +202,8 @@ function App() {
   return (
     <ConfigProvider colorScheme="dark">
       <AdaptivityProvider viewWidth={ViewWidth.MOBILE}>
-        <AppRoot style={{ maxWidth: '600px', margin: '0 auto', minHeight: '100vh' }}>
+        <AppRoot>
+          <div style={{ maxWidth: '600px', margin: '0 auto' }}>
           <View activePanel={activePanel}>
 
             <Panel id="splash">
@@ -393,6 +394,7 @@ function App() {
 
           </View>
           {snackbar && <Snackbar onClose={() => setSnackbar(null)}>{snackbar}</Snackbar>}
+          </div>
         </AppRoot>
       </AdaptivityProvider>
     </ConfigProvider>
