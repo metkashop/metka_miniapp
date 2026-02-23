@@ -34,5 +34,6 @@ button {
 
 .vkuiPanel__in,
 .vkuiPanel__in-x {
-  max-width: 100% !important;
+  max-width: 600px !important;
+  margin: 0 auto !important;
 }
