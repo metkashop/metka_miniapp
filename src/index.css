@@ -44,3 +44,8 @@ button {
   left: auto !important;
   right: auto !important;
 }
+
+.vkuiPanelHeader__in {
+  max-width: 600px !important;
+  margin: 0 auto !important;
+}
