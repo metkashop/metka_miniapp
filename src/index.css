@@ -37,3 +37,10 @@ button {
   max-width: 600px !important;
   margin: 0 auto !important;
 }
+
+.vkuiPanelHeader {
+  max-width: 600px !important;
+  margin: 0 auto !important;
+  left: auto !important;
+  right: auto !important;
+}
