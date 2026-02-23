@@ -18,15 +18,22 @@ jobs:
       - name: Install and build
         run: npm install && npm run build
 
-      - name: Deploy to VDS
+      - name: Copy dist to VDS
+        uses: appleboy/scp-action@master
+        with:
+          host: 176.119.147.38
+          username: root
+          password: ${{ secrets.SSH_PASSWORD }}
+          source: "dist/"
+          target: "/var/www/"
+
+      - name: Deploy backend to VDS
         uses: appleboy/ssh-action@master
         with:
           host: 176.119.147.38
           username: root
           password: ${{ secrets.SSH_PASSWORD }}
           script: |
-            cd /var/www
-            git pull origin master
-            cd backend
+            cd /var/www/backend
             npm install
             pm2 restart metkashop
