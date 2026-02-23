@@ -1,3 +1,4 @@
+require('dotenv').config()
 const express = require('express')
 const cors = require('cors')
 const path = require('path')
@@ -60,6 +61,7 @@ async function initDB() {
       delivery_pvz TEXT,
       delivery_type TEXT,
       delivery_cost INTEGER,
+      tracking TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
@@ -155,6 +157,11 @@ app.post('/api/orders', (req, res) => {
   res.json({ id: result.lastInsertRowid })
 })
 
+app.patch('/api/orders/:id/tracking', (req, res) => {
+  run('UPDATE orders SET tracking = ? WHERE id = ?', [req.body.tracking, req.params.id])
+  res.json({ ok: true })
+})
+
 app.patch('/api/orders/:id/status', (req, res) => {
   run('UPDATE orders SET status = ? WHERE id = ?', [req.body.status, req.params.id])
   res.json({ ok: true })
@@ -202,6 +209,137 @@ app.post('/api/promocodes', (req, res) => {
 app.delete('/api/promocodes/:id', (req, res) => {
   run('DELETE FROM promocodes WHERE id = ?', [req.params.id])
   res.json({ ok: true })
+})
+
+
+// ============ СДЭК ============
+const https = require('https')
+
+async function cdekRequest(method, url, data = null) {
+  const CDEK_CLIENT_ID = process.env.CDEK_CLIENT_ID
+  const CDEK_CLIENT_SECRET = process.env.CDEK_CLIENT_SECRET
+  const CDEK_API_URL = process.env.CDEK_API_URL || 'https://api.cdek.ru/v2'
+
+  // Получаем токен
+  const tokenRes = await fetch(`${CDEK_API_URL}/oauth/token`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: `grant_type=client_credentials&client_id=${CDEK_CLIENT_ID}&client_secret=${CDEK_CLIENT_SECRET}`
+  })
+  const tokenData = await tokenRes.json()
+  const token = tokenData.access_token
+  if (!token) throw new Error('CDEK token failed')
+
+  const options = {
+    method,
+    headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }
+  }
+  if (data) options.body = JSON.stringify(data)
+
+  const res = await fetch(`${CDEK_API_URL}${url}`, options)
+  return res.json()
+}
+
+// Поиск городов СДЭК
+app.get('/api/cdek/cities', async (req, res) => {
+  try {
+    const { q } = req.query
+    if (!q || q.length < 2) return res.json([])
+    const data = await cdekRequest('GET', `/location/cities?city=${encodeURIComponent(q)}&country_codes=RU&size=7`)
+    res.json(Array.isArray(data) ? data.map(c => ({ code: c.code, name: c.city, region: c.region })) : [])
+  } catch(e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+// Список ПВЗ в городе
+app.get('/api/cdek/pvz', async (req, res) => {
+  try {
+    const { city_code } = req.query
+    const data = await cdekRequest('GET', `/deliverypoints?city_code=${city_code}&type=PVZ&size=100`)
+    const pvzList = Array.isArray(data) ? data : []
+    res.json(pvzList.map(p => ({
+      code: p.code,
+      name: p.name,
+      address: p.location?.address,
+      lat: p.location?.latitude,
+      lon: p.location?.longitude,
+      work_time: p.work_time,
+      type: p.type
+    })))
+  } catch(e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+// Расчёт тарифов СДЭК
+app.post('/api/cdek/calculate', async (req, res) => {
+  try {
+    const { city_code, pvz_code, items } = req.body
+    const SENDER_CITY_CODE = parseInt(process.env.SENDER_CITY_CODE) || 137
+    const SENDER_PVZ_CODE = process.env.SENDER_PVZ_CODE || 'SPB160'
+    const TARIFFS = [136, 234, 368, 378]
+
+    // Считаем суммарный вес и размеры из товаров
+    let totalWeight = 0
+    let totalCost = 0
+    items.forEach(item => {
+      totalWeight += (item.weight || 300) * item.qty
+      totalCost += item.price * item.qty
+    })
+
+    const results = []
+    for (const tariff of TARIFFS) {
+      try {
+        const data = await cdekRequest('POST', '/calculator/tariff', {
+          type: 1,
+          from_location: { code: SENDER_CITY_CODE },
+          to_location: { code: city_code },
+          tariff_code: tariff,
+          shipment_point: SENDER_PVZ_CODE,
+          delivery_point: pvz_code,
+          services: [{ code: 'INSURANCE', parameter: String(totalCost) }],
+          packages: [{ weight: totalWeight, length: 30, width: 40, height: 3 }]
+        })
+        if (data.total_sum) {
+          results.push({
+            tariff_code: tariff,
+            cost: Math.ceil(data.total_sum) + 30,
+            days: data.period_min || 3
+          })
+        }
+      } catch(e) {}
+    }
+    res.json(results)
+  } catch(e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+// Подсказки DaData (улицы)
+app.get('/api/dadata/suggest', async (req, res) => {
+  try {
+    const { q, city } = req.query
+    const DADATA_KEY = process.env.DADATA_KEY
+    const response = await fetch('https://suggestions.dadata.ru/suggestions/api/4_1/rs/suggest/address', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Token ${DADATA_KEY}`
+      },
+      body: JSON.stringify({
+        query: `${city} ${q}`,
+        count: 7,
+        from_bound: { value: 'street' },
+        to_bound: { value: 'street' },
+        locations: [{ city }]
+      })
+    })
+    const data = await response.json()
+    res.json((data.suggestions || []).map(s => ({ value: s.value, unrestricted: s.unrestricted_value })))
+  } catch(e) {
+    res.status(500).json({ error: e.message })
+  }
 })
 
 // Запуск
