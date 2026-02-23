@@ -36,4 +36,4 @@ jobs:
           script: |
             cd /var/www/backend
             npm install
-            pm2 restart metkashop
+            pm2 restart metkashop || pm2 start /var/www/backend/server.js --name metkashop
