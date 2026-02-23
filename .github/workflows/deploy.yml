@@ -34,6 +34,9 @@ jobs:
           username: root
           password: ${{ secrets.SSH_PASSWORD }}
           script: |
+            rm -rf /var/www/dist/assets/*.js /var/www/dist/assets/*.css
+            cp -r /var/www/dist/dist/assets/* /var/www/dist/assets/ 2>/dev/null || true
+            rm -rf /var/www/dist/dist
             cd /var/www/backend
             npm install
             pm2 restart metkashop || pm2 start /var/www/backend/server.js --name metkashop
