@@ -24,19 +24,17 @@ jobs:
           host: 176.119.147.38
           username: root
           password: ${{ secrets.SSH_PASSWORD }}
-          source: "dist/"
-          target: "/var/www/"
+          source: "dist/*"
+          target: "/var/www/dist/"
+          strip_components: 1
 
-      - name: Deploy backend to VDS
+      - name: Restart backend
         uses: appleboy/ssh-action@master
         with:
           host: 176.119.147.38
           username: root
           password: ${{ secrets.SSH_PASSWORD }}
           script: |
-            rm -rf /var/www/dist/assets/*.js /var/www/dist/assets/*.css
-            cp -r /var/www/dist/dist/assets/* /var/www/dist/assets/ 2>/dev/null || true
-            rm -rf /var/www/dist/dist
             cd /var/www/backend
             npm install
             pm2 restart metkashop || pm2 start /var/www/backend/server.js --name metkashop
