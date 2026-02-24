@@ -298,9 +298,21 @@ function App() {
           <View activePanel={activePanel}>
 
             <Panel id="splash">
-              <div onClick={() => setActivePanel('catalog')} style={{ height: '100vh', cursor: 'pointer', overflow: 'hidden', background: '#111', display: 'flex', justifyContent: 'center' }}>
-                <img src={`${API}/img/cover/cover.jpg`} alt="METKA SHOP" style={{ height: '100%', width: 'auto', maxWidth: '100%', objectFit: 'cover', objectPosition: 'center', display: 'block' }} />
-              </div>
+              <div 
+                onClick={() => setActivePanel('catalog')} 
+                style={{ 
+                  height: '100vh', 
+                  cursor: 'pointer', 
+                  /* Загружаем картинку фоном */
+                  backgroundImage: `url(${API}/img/cover/cover.jpg)`,
+                  /* COVER — заполнит весь экран без дырок по бокам */
+                  backgroundSize: 'cover',
+                  /* Прижимаем к низу, чтобы "пожертвовать" верхушкой, как ты и хотел */
+                  backgroundPosition: 'center bottom',
+                  backgroundRepeat: 'no-repeat',
+                  backgroundColor: '#111'
+                }} 
+              />
             </Panel>
 
             <Panel id="catalog">
