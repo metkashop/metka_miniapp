@@ -99,6 +99,14 @@ function App() {
   const [promoError, setPromoError] = useState('')
   const [promoLoading, setPromoLoading] = useState(false)
 
+  // Оценка доставки в корзине
+  const [cartCitySearch, setCartCitySearch] = useState('')
+  const [cartCityResults, setCartCityResults] = useState([])
+  const [cartCity, setCartCity] = useState(null)
+  const [deliveryEstimate, setDeliveryEstimate] = useState(null)
+  const [estimateLoading, setEstimateLoading] = useState(false)
+  const cartCityTimer = useRef(null)
+
   // СДЭК и Адреса
   const [citySearch, setCitySearch] = useState('')
   const [cityResults, setCityResults] = useState([])
@@ -174,6 +182,37 @@ function App() {
   }
 
   const removePromo = () => { setPromoApplied(null); setPromoCode(''); setPromoError('') }
+
+  const searchCartCity = (q) => {
+    setCartCitySearch(q)
+    setDeliveryEstimate(null)
+    if (q.length < 2) { setCartCityResults([]); return }
+    clearTimeout(cartCityTimer.current)
+    cartCityTimer.current = setTimeout(async () => {
+      try {
+        const res = await fetch(`${API}/api/cdek/cities?q=${encodeURIComponent(q)}`)
+        setCartCityResults(await res.json())
+      } catch(e) {}
+    }, 400)
+  }
+
+  const selectCartCity = async (city) => {
+    setCartCity(city)
+    setCartCitySearch(city.name)
+    setCartCityResults([])
+    setEstimateLoading(true)
+    setDeliveryEstimate(null)
+    try {
+      const res = await fetch(`${API}/api/cdek/estimate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ city_code: city.code, items: cart })
+      })
+      const data = await res.json()
+      setDeliveryEstimate(data)
+    } catch(e) {}
+    setEstimateLoading(false)
+  }
 
   // 1. Поиск города (ОФИЦИАЛЬНЫЙ API V2 ЧЕРЕЗ БЭКЕНД)
   const searchCity = (q) => {
@@ -484,11 +523,55 @@ function App() {
                           <Text style={{ color: '#44cc88', fontSize: '13px' }}>−{discount} ₽</Text>
                         </div>
                       )}
-                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '16px', paddingTop: '8px', borderTop: '1px solid #333' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', paddingTop: '8px', borderTop: '1px solid #333', marginBottom: '16px' }}>
                         <Title level="3">Итого</Title>
                         <Title level="3">{total} ₽</Title>
                       </div>
-                      <Button size="l" stretched onClick={() => setActivePanel('checkout')}>Оформить заказ</Button>
+
+                      {/* Блок оценки доставки */}
+                      <div style={{ background: '#1a1a2e', border: '1px solid #333', borderRadius: '10px', padding: '12px', marginBottom: '16px' }}>
+                        <Text style={{ fontSize: '13px', color: '#aaa', marginBottom: '8px', display: 'block' }}>🚚 Узнать стоимость доставки</Text>
+                        <Input
+                          placeholder="Введите ваш город"
+                          value={cartCitySearch}
+                          onChange={e => searchCartCity(e.target.value)}
+                          style={{ marginBottom: '4px' }}
+                        />
+                        {cartCityResults.length > 0 && (
+                          <div style={{ background: '#111', border: '1px solid #333', borderRadius: '8px', marginTop: '4px', overflow: 'hidden' }}>
+                            {cartCityResults.map(city => (
+                              <div key={city.code} onClick={() => selectCartCity(city)}
+                                style={{ padding: '8px 12px', cursor: 'pointer', borderBottom: '1px solid #222' }}>
+                                <Text style={{ fontSize: '13px' }}>{city.name}</Text>
+                                {city.region && <Text style={{ fontSize: '11px', color: '#666', display: 'block' }}>{city.region}</Text>}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        {estimateLoading && (
+                          <div style={{ display: 'flex', justifyContent: 'center', padding: '12px' }}><Spinner size="small" /></div>
+                        )}
+                        {deliveryEstimate && !estimateLoading && (
+                          deliveryEstimate.error
+                            ? <Text style={{ color: '#e24a4a', fontSize: '13px', marginTop: '8px', display: 'block' }}>Не удалось рассчитать доставку</Text>
+                            : <div style={{ marginTop: '10px', padding: '10px', background: '#0a2a0a', border: '1px solid #44aa44', borderRadius: '8px' }}>
+                                <Text style={{ color: '#88ff88', fontSize: '13px' }}>
+                                  Доставка в <strong>{cartCity?.name}</strong>: от <strong>{deliveryEstimate.cost} ₽</strong>
+                                </Text>
+                                <Text style={{ color: '#666', fontSize: '11px', display: 'block', marginTop: '2px' }}>
+                                  ≈ {deliveryEstimate.days} дней · Точная стоимость при выборе ПВЗ
+                                </Text>
+                              </div>
+                        )}
+                      </div>
+
+                      <Button size="l" stretched onClick={() => {
+                        if (cartCity) {
+                          setSelectedCity(cartCity)
+                          setCitySearch(cartCity.name)
+                        }
+                        setActivePanel('checkout')
+                      }}>Оформить заказ</Button>
                     </div>
                   </>
               }

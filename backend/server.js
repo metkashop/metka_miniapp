@@ -305,8 +305,8 @@ app.post('/api/cdek/calculate', async (req, res) => {
     let totalWeight = 0
     let totalCost = 0
     items.forEach(item => {
-      totalWeight += (item.weight || 300) * item.qty
-      totalCost += item.price * item.qty
+      totalWeight += (item.weight || 300)
+      totalCost += item.price
     })
 
     const results = []
@@ -323,15 +323,59 @@ app.post('/api/cdek/calculate', async (req, res) => {
           packages: [{ weight: totalWeight, length: 30, width: 40, height: 3 }]
         })
         if (data.total_sum) {
+          const rounded = Math.ceil(data.total_sum / 10) * 10
           results.push({
             tariff_code: tariff,
-            cost: Math.ceil(data.total_sum) + 30,
+            cost: rounded + 30,
             days: data.period_min || 3
           })
         }
       } catch(e) {}
     }
     res.json(results)
+  } catch(e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+
+// Оценка стоимости доставки склад-склад (для показа в корзине)
+app.post('/api/cdek/estimate', async (req, res) => {
+  try {
+    const { city_code, items } = req.body
+    if (!city_code) return res.status(400).json({ error: 'city_code required' })
+    const SENDER_CITY_CODE = parseInt(process.env.SENDER_CITY_CODE) || 137
+    const TARIFFS = [136, 234, 368, 378]
+
+    let totalWeight = 0
+    let totalCost = 0
+    items.forEach(item => {
+      totalWeight += (item.weight || 300)
+      totalCost += item.price
+    })
+
+    let minCost = null
+    let minDays = null
+    for (const tariff of TARIFFS) {
+      try {
+        const data = await cdekRequest('POST', '/calculator/tariff', {
+          type: 1,
+          from_location: { code: SENDER_CITY_CODE },
+          to_location: { code: city_code },
+          tariff_code: tariff,
+          services: [{ code: 'INSURANCE', parameter: String(totalCost) }],
+          packages: [{ weight: totalWeight, length: 30, width: 40, height: 3 }]
+        })
+        if (data.total_sum) {
+          const cost = Math.ceil(data.total_sum / 10) * 10 + 30
+          if (minCost === null || cost < minCost) {
+            minCost = cost
+            minDays = data.period_min || 3
+          }
+        }
+      } catch(e) {}
+    }
+    res.json(minCost !== null ? { cost: minCost, days: minDays } : { error: 'Не удалось рассчитать' })
   } catch(e) {
     res.status(500).json({ error: e.message })
   }
