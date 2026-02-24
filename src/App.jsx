@@ -224,7 +224,7 @@ function App() {
         method: "POST",
         headers: { 
           "Content-Type": "application/json", 
-          "Authorization": "Token ВСТАВЬ_СЮДА_ТОКЕН_DADATA" // <-- ВАЖНО: ТВОЙ ТОКЕН DADATA
+          "Authorization": "f857f124c478d8cd818f19af870979240a757e0d" // <-- ВАЖНО: ТВОЙ ТОКЕН DADATA
         },
         body: JSON.stringify({ query: `${selectedCity.name} ${q}`, count: 5 })
       })
