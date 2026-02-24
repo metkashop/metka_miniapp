@@ -297,23 +297,22 @@ function App() {
         <AppRoot>
           <View activePanel={activePanel}>
 
-            <Panel id="splash">
-              <div 
-                onClick={() => setActivePanel('catalog')} 
-                style={{ 
-                  height: '100vh', 
-                  cursor: 'pointer', 
-                  /* Загружаем картинку фоном */
-                  backgroundImage: `url(${API}/img/cover/cover.jpg)`,
-                  /* COVER — заполнит весь экран без дырок по бокам */
-                  backgroundSize: 'cover',
-                  /* Прижимаем к низу, чтобы "пожертвовать" верхушкой, как ты и хотел */
-                  backgroundPosition: 'center bottom',
-                  backgroundRepeat: 'no-repeat',
-                  backgroundColor: '#111'
-                }} 
-              />
-            </Panel>
+           <Panel id="splash">
+             <div 
+               onClick={() => setActivePanel('catalog')} 
+               style={{ 
+                 height: '100vh', 
+                 cursor: 'pointer', 
+                 backgroundColor: '#111',
+                 backgroundImage: `url(${API}/img/cover/cover.jpg)`,
+                 backgroundRepeat: 'no-repeat',
+                 backgroundPosition: 'center center',
+                 /* Магия: на мобилках (ширина < 600px) показываем картинку целиком, 
+                    на широких экранах — растягиваем (cover) */
+                 backgroundSize: window.innerWidth < 600 ? 'contain' : 'cover'
+               }} 
+             />
+           </Panel>
 
             <Panel id="catalog">
               <PanelHeader after={cartButton}>METKA SHOP</PanelHeader>
