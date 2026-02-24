@@ -4,12 +4,12 @@ import { Icon28ShoppingCartOutline, Icon28FavoriteOutline, Icon28Favorite, Icon2
 import bridge from '@vkontakte/vk-bridge'
 import '@vkontakte/vkui/dist/vkui.css'
 
-// ===== НОВЫЙ ИМПОРТ ДЛЯ КАРТЫ =====
+// ===== ИМПОРТЫ ДЛЯ КАРТЫ =====
 import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 
-// Исправляем иконки маркеров (чтобы они отображались)
+// Настройка стандартных иконок Leaflet (чтобы они отображались)
 delete L.Icon.Default.prototype._getIconUrl
 L.Icon.Default.mergeOptions({
   iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
@@ -17,14 +17,25 @@ L.Icon.Default.mergeOptions({
   shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
 })
 
+// Создаём зелёную иконку для выбранного ПВЗ (один раз, чтобы не создавать при каждом рендере)
+const selectedIcon = new L.Icon({
+  iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-green.png',
+  shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
+  iconSize: [25, 41],
+  iconAnchor: [12, 41],
+  popupAnchor: [1, -34],
+  shadowSize: [41, 41]
+})
+
 // ===== КОМПОНЕНТ КАРТЫ =====
 function PvzMap({ pvzList, selectedPvz, onSelectPvz, userCoords }) {
-  // Центр карты: координаты пользователя, если есть, иначе первый ПВЗ, иначе Москва
+  // Определяем центр карты: сначала координаты пользователя, если есть, иначе первый ПВЗ с координатами, иначе Москва
+  const firstValidPvz = pvzList.find(p => p.lat && p.lon)
   const center = userCoords
     ? [userCoords.lat, userCoords.lon]
-    : pvzList[0]
-    ? [pvzList[0].lat, pvzList[0].lon]
-    : [55.75, 37.62]
+    : firstValidPvz
+    ? [firstValidPvz.lat, firstValidPvz.lon]
+    : [55.75, 37.62] // Москва по умолчанию
 
   return (
     <MapContainer
@@ -34,24 +45,23 @@ function PvzMap({ pvzList, selectedPvz, onSelectPvz, userCoords }) {
     >
       <TileLayer
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
       />
       {pvzList.map(pvz => {
-        const lat = parseFloat(pvz.lat)
-        const lon = parseFloat(pvz.lon)
+        // Пробуем получить координаты из разных возможных полей
+        const lat = parseFloat(pvz.lat || pvz.coordY || pvz.location?.latitude)
+        const lon = parseFloat(pvz.lon || pvz.coordX || pvz.location?.longitude)
+        // Если координат нет — не рисуем маркер
         if (!lat || !lon) return null
+
         const isSelected = selectedPvz?.code === pvz.code
+
         return (
           <Marker
             key={pvz.code}
             position={[lat, lon]}
             eventHandlers={{ click: () => onSelectPvz(pvz) }}
-            icon={isSelected ? new L.Icon({
-              iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-green.png',
-              shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
-              iconSize: [25, 41],
-              iconAnchor: [12, 41]
-            }) : undefined}
+            icon={isSelected ? selectedIcon : undefined}
           >
             <Popup>
               <strong>{pvz.address}</strong><br />
@@ -65,7 +75,7 @@ function PvzMap({ pvzList, selectedPvz, onSelectPvz, userCoords }) {
   )
 }
 
-// ===== ОСТАЛЬНЫЕ КОМПОНЕНТЫ (Lightbox, ProductDetail) – БЕЗ ИЗМЕНЕНИЙ =====
+// ===== Lightbox (увеличение фото) =====
 function Lightbox({ src, onClose }) {
   return (
     <div onClick={onClose} style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', background: 'rgba(0,0,0,0.95)', zIndex: 9999, display: 'flex', alignItems: 'flex-start', justifyContent: 'center', cursor: 'zoom-out', overflowY: 'auto' }}>
@@ -74,6 +84,7 @@ function Lightbox({ src, onClose }) {
   )
 }
 
+// ===== Детальная карточка товара =====
 function ProductDetail({ product, onAdd, favorites, toggleFavorite }) {
   const sizes = product.sizes ? product.sizes.split(',').map(s => s.trim()) : []
   const images = product.images
@@ -332,7 +343,7 @@ function App() {
     setDeliveryOptions([])
     setSelectedDelivery(null)
 
-    // Получаем координаты из ответа DaData (они есть в unrestricted_value)
+    // Получаем координаты из ответа DaData
     try {
       const res = await fetch('https://suggestions.dadata.ru/suggestions/api/4_1/rs/findById/address', {
         method: 'POST',
@@ -355,17 +366,18 @@ function App() {
     try {
       const res = await fetch(`${API}/api/cdek/pvz?city_code=${selectedCity.code}`)
       const allPvz = await res.json()
-      // Рассчитываем расстояние, если есть координаты пользователя
+      // Рассчитываем расстояние, используя актуальные координаты пользователя
       const withDistance = allPvz.map(pvz => {
-        const pLat = parseFloat(pvz.lat)
-        const pLon = parseFloat(pvz.lon)
+        // Координаты ПВЗ могут быть в разных полях
+        const pLat = parseFloat(pvz.lat || pvz.coordY || pvz.location?.latitude)
+        const pLon = parseFloat(pvz.lon || pvz.coordX || pvz.location?.longitude)
         if (!userCoords || !pLat || !pLon) return { ...pvz, distance: 999 }
         const d = 2 * 6371 * Math.asin(Math.sqrt(
           Math.pow(Math.sin((pLat - userCoords.lat) * Math.PI / 360), 2) +
           Math.cos(userCoords.lat * Math.PI / 180) * Math.cos(pLat * Math.PI / 180) *
           Math.pow(Math.sin((pLon - userCoords.lon) * Math.PI / 360), 2)
         ))
-        return { ...pvz, distance: d }
+        return { ...pvz, lat: pLat, lon: pLon, distance: d } // сохраняем координаты для карты
       })
       setPvzList(withDistance.sort((a, b) => a.distance - b.distance).slice(0, 10))
     } catch (e) { console.error(e) }
