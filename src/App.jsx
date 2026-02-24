@@ -27,15 +27,46 @@ const selectedIcon = new L.Icon({
   shadowSize: [41, 41]
 })
 
-// ===== КОМПОНЕНТ КАРТЫ =====
+// ===== КОМПОНЕНТ КАРТЫ (без зависимостей от файлов иконок) =====
 function PvzMap({ pvzList, selectedPvz, onSelectPvz, userCoords }) {
-  // Определяем центр карты: сначала координаты пользователя, если есть, иначе первый ПВЗ с координатами, иначе Москва
-  const firstValidPvz = pvzList.find(p => p.lat && p.lon)
+  // Функция для создания иконки на основе CSS (не требует изображений)
+  const createPvzIcon = (isSelected) => {
+    return L.divIcon({
+      className: 'custom-pvz-icon',
+      html: `<div style="
+        background-color: ${isSelected ? '#4caf50' : '#2196f3'};
+        width: 24px;
+        height: 24px;
+        border-radius: 50%;
+        border: 2px solid white;
+        box-shadow: 0 2px 5px rgba(0,0,0,0.3);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: white;
+        font-weight: bold;
+        font-size: 12px;
+      "></div>`,
+      iconSize: [24, 24],
+      popupAnchor: [0, -12]
+    });
+  };
+
+  // Определяем центр карты: сначала координаты пользователя, иначе первый ПВЗ с координатами, иначе Москва
+  const firstValidPvz = pvzList.find(p => {
+    const lat = parseFloat(p.lat || p.coordY || p.location?.latitude);
+    const lon = parseFloat(p.lon || p.coordX || p.location?.longitude);
+    return lat && lon;
+  });
+  
   const center = userCoords
     ? [userCoords.lat, userCoords.lon]
     : firstValidPvz
-    ? [firstValidPvz.lat, firstValidPvz.lon]
-    : [55.75, 37.62] // Москва по умолчанию
+    ? [
+        parseFloat(firstValidPvz.lat || firstValidPvz.coordY || firstValidPvz.location?.latitude),
+        parseFloat(firstValidPvz.lon || firstValidPvz.coordX || firstValidPvz.location?.longitude)
+      ]
+    : [55.75, 37.62]; // Москва по умолчанию
 
   return (
     <MapContainer
@@ -49,19 +80,19 @@ function PvzMap({ pvzList, selectedPvz, onSelectPvz, userCoords }) {
       />
       {pvzList.map(pvz => {
         // Пробуем получить координаты из разных возможных полей
-        const lat = parseFloat(pvz.lat || pvz.coordY || pvz.location?.latitude)
-        const lon = parseFloat(pvz.lon || pvz.coordX || pvz.location?.longitude)
+        const lat = parseFloat(pvz.lat || pvz.coordY || pvz.location?.latitude);
+        const lon = parseFloat(pvz.lon || pvz.coordX || pvz.location?.longitude);
         // Если координат нет — не рисуем маркер
-        if (!lat || !lon) return null
+        if (!lat || !lon) return null;
 
-        const isSelected = selectedPvz?.code === pvz.code
+        const isSelected = selectedPvz?.code === pvz.code;
 
         return (
           <Marker
             key={pvz.code}
             position={[lat, lon]}
             eventHandlers={{ click: () => onSelectPvz(pvz) }}
-            icon={isSelected ? selectedIcon : undefined}
+            icon={createPvzIcon(isSelected)}
           >
             <Popup>
               <strong>{pvz.address}</strong><br />
@@ -69,10 +100,10 @@ function PvzMap({ pvzList, selectedPvz, onSelectPvz, userCoords }) {
               {pvz.distance && <>Расстояние: {pvz.distance.toFixed(1)} км</>}
             </Popup>
           </Marker>
-        )
+        );
       })}
     </MapContainer>
-  )
+  );
 }
 
 // ===== Lightbox (увеличение фото) =====
