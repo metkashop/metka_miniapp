@@ -116,7 +116,7 @@ function App() {
   const [checkoutStep, setCheckoutStep] = useState(1) 
   const [showCancelDialog, setShowCancelDialog] = useState(false)
 
-  // Таймер для дебаунса СДЭКа
+  // Таймер для дебаунса
   const citySearchTimer = useRef(null)
 
   useEffect(() => {
@@ -175,7 +175,7 @@ function App() {
 
   const removePromo = () => { setPromoApplied(null); setPromoCode(''); setPromoError('') }
 
-  // 1. Поиск города (ИСПРАВЛЕННЫЙ С ТАЙМЕРОМ)
+  // 1. Поиск города (ОФИЦИАЛЬНЫЙ API V2 ЧЕРЕЗ БЭКЕНД)
   const searchCity = (q) => {
     setCitySearch(q)
     if (q.length < 2) { 
@@ -184,23 +184,22 @@ function App() {
     }
     
     clearTimeout(citySearchTimer.current)
-    citySearchTimer.current = setTimeout(() => {
-      const callbackName = 'cdekCallback_' + Date.now()
-      window[callbackName] = (data) => {
+    citySearchTimer.current = setTimeout(async () => {
+      try {
+        const res = await fetch(`${API}/api/cdek/cities?city=${encodeURIComponent(q)}`);
+        const data = await res.json();
+        
         const cities = (data || []).map(c => ({
-          code: c.id,
-          name: c.name,
+          code: c.code,
+          name: c.city,
           region: c.region || ''
-        }))
-        setCityResults(cities)
-        delete window[callbackName]
-        document.getElementById(callbackName)?.remove()
+        }));
+        
+        setCityResults(cities);
+      } catch (e) {
+        console.error("CDEK API Error:", e);
       }
-      const script = document.createElement('script')
-      script.id = callbackName
-      script.src = `https://api.cdek.ru/city/getListByTerm/jsonp.php?q=${encodeURIComponent(q)}&callback=${callbackName}`
-      document.head.appendChild(script)
-    }, 500) // Задержка полсекунды, чтобы не спамить СДЭК
+    }, 500)
   }
 
   const selectCity = (city) => {
@@ -215,7 +214,7 @@ function App() {
     setSelectedDelivery(null)
   }
 
-  // 2. Поиск улицы через DaData
+  // 2. Поиск улицы через DaData (чтобы вытащить координаты для ПВЗ)
   const searchStreet = async (q) => {
     setStreetSearch(q)
     if (q.length < 3 || !selectedCity) { setStreetResults([]); return }
@@ -224,7 +223,7 @@ function App() {
         method: "POST",
         headers: { 
           "Content-Type": "application/json", 
-          "Authorization": "f857f124c478d8cd818f19af870979240a757e0d" // <-- ВАЖНО: ТВОЙ ТОКЕН DADATA
+          "Authorization": "Token ВСТАВЬ_СЮДА_ТОКЕН_DADATA" // <-- ВАЖНО: ТВОЙ ТОКЕН DADATA
         },
         body: JSON.stringify({ query: `${selectedCity.name} ${q}`, count: 5 })
       })
@@ -251,8 +250,8 @@ function App() {
       const allPvz = await res.json()
       
       const withDistance = allPvz.map(pvz => {
-        const pLat = parseFloat(pvz.coordY);
-        const pLon = parseFloat(pvz.coordX);
+        const pLat = parseFloat(pvz.coordY || pvz.location?.latitude);
+        const pLon = parseFloat(pvz.coordX || pvz.location?.longitude);
         if (!pLat || !pLon || !lat || !lon) return { ...pvz, distance: 999 };
         
         const d = 2 * 6371 * Math.asin(Math.sqrt(
