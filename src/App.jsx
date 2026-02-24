@@ -4,10 +4,68 @@ import { Icon28ShoppingCartOutline, Icon28FavoriteOutline, Icon28Favorite, Icon2
 import bridge from '@vkontakte/vk-bridge'
 import '@vkontakte/vkui/dist/vkui.css'
 
-const API = typeof window !== 'undefined' && window.location.hostname !== 'localhost' 
-  ? '' 
-  : 'http://192.168.1.2:3001'
+// ===== НОВЫЙ ИМПОРТ ДЛЯ КАРТЫ =====
+import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet'
+import L from 'leaflet'
+import 'leaflet/dist/leaflet.css'
 
+// Исправляем иконки маркеров (чтобы они отображались)
+delete L.Icon.Default.prototype._getIconUrl
+L.Icon.Default.mergeOptions({
+  iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
+  iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
+  shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
+})
+
+// ===== КОМПОНЕНТ КАРТЫ =====
+function PvzMap({ pvzList, selectedPvz, onSelectPvz, userCoords }) {
+  // Центр карты: координаты пользователя, если есть, иначе первый ПВЗ, иначе Москва
+  const center = userCoords
+    ? [userCoords.lat, userCoords.lon]
+    : pvzList[0]
+    ? [pvzList[0].lat, pvzList[0].lon]
+    : [55.75, 37.62]
+
+  return (
+    <MapContainer
+      center={center}
+      zoom={12}
+      style={{ height: '300px', width: '100%', borderRadius: '8px', marginBottom: '16px' }}
+    >
+      <TileLayer
+        url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+      />
+      {pvzList.map(pvz => {
+        const lat = parseFloat(pvz.lat)
+        const lon = parseFloat(pvz.lon)
+        if (!lat || !lon) return null
+        const isSelected = selectedPvz?.code === pvz.code
+        return (
+          <Marker
+            key={pvz.code}
+            position={[lat, lon]}
+            eventHandlers={{ click: () => onSelectPvz(pvz) }}
+            icon={isSelected ? new L.Icon({
+              iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-green.png',
+              shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
+              iconSize: [25, 41],
+              iconAnchor: [12, 41]
+            }) : undefined}
+          >
+            <Popup>
+              <strong>{pvz.address}</strong><br />
+              {pvz.work_time && <>Время работы: {pvz.work_time}<br /></>}
+              {pvz.distance && <>Расстояние: {pvz.distance.toFixed(1)} км</>}
+            </Popup>
+          </Marker>
+        )
+      })}
+    </MapContainer>
+  )
+}
+
+// ===== ОСТАЛЬНЫЕ КОМПОНЕНТЫ (Lightbox, ProductDetail) – БЕЗ ИЗМЕНЕНИЙ =====
 function Lightbox({ src, onClose }) {
   return (
     <div onClick={onClose} style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', background: 'rgba(0,0,0,0.95)', zIndex: 9999, display: 'flex', alignItems: 'flex-start', justifyContent: 'center', cursor: 'zoom-out', overflowY: 'auto' }}>
@@ -82,6 +140,11 @@ function ProductDetail({ product, onAdd, favorites, toggleFavorite }) {
   )
 }
 
+// ===== ОСНОВНОЙ КОМПОНЕНТ APP =====
+const API = typeof window !== 'undefined' && window.location.hostname !== 'localhost' 
+  ? '' 
+  : 'http://192.168.1.2:3001'
+
 function App() {
   const [activePanel, setActivePanel] = useState('splash')
   const [products, setProducts] = useState([])
@@ -107,7 +170,7 @@ function App() {
   const [estimateLoading, setEstimateLoading] = useState(false)
   const cartCityTimer = useRef(null)
 
-  // СДЭК и Адреса
+  // СДЭК и Адреса (для чекаута)
   const [citySearch, setCitySearch] = useState('')
   const [cityResults, setCityResults] = useState([])
   const [selectedCity, setSelectedCity] = useState(null)
@@ -124,7 +187,6 @@ function App() {
   const [checkoutStep, setCheckoutStep] = useState(1) 
   const [showCancelDialog, setShowCancelDialog] = useState(false)
 
-  // Таймер для дебаунса
   const citySearchTimer = useRef(null)
 
   useEffect(() => {
@@ -183,6 +245,7 @@ function App() {
 
   const removePromo = () => { setPromoApplied(null); setPromoCode(''); setPromoError('') }
 
+  // Поиск города для предварительной оценки (и для чекаута)
   const searchCartCity = (q) => {
     setCartCitySearch(q)
     setDeliveryEstimate(null)
@@ -191,7 +254,8 @@ function App() {
     cartCityTimer.current = setTimeout(async () => {
       try {
         const res = await fetch(`${API}/api/cdek/cities?q=${encodeURIComponent(q)}`)
-        setCartCityResults(await res.json())
+        const data = await res.json()
+        setCartCityResults(data)
       } catch(e) {}
     }, 400)
   }
@@ -206,7 +270,16 @@ function App() {
       const res = await fetch(`${API}/api/cdek/estimate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ city_code: city.code, items: cart })
+        body: JSON.stringify({
+          city_code: city.code,
+          items: cart.map(item => ({
+            price: item.price,
+            weight: item.weight || 300,
+            length: item.length || 30,
+            width: item.width || 40,
+            height: item.height || 3
+          }))
+        })
       })
       const data = await res.json()
       setDeliveryEstimate(data)
@@ -214,30 +287,17 @@ function App() {
     setEstimateLoading(false)
   }
 
-  // 1. Поиск города (ОФИЦИАЛЬНЫЙ API V2 ЧЕРЕЗ БЭКЕНД)
+  // Поиск города (для чекаута)
   const searchCity = (q) => {
     setCitySearch(q)
-    if (q.length < 2) { 
-      setCityResults([])
-      return 
-    }
-    
+    if (q.length < 2) { setCityResults([]); return }
     clearTimeout(citySearchTimer.current)
     citySearchTimer.current = setTimeout(async () => {
       try {
-        const res = await fetch(`${API}/api/cdek/cities?city=${encodeURIComponent(q)}`);
-        const data = await res.json();
-        
-        const cities = (data || []).map(c => ({
-          code: c.code,
-          name: c.city,
-          region: c.region || ''
-        }));
-        
-        setCityResults(cities);
-      } catch (e) {
-        console.error("CDEK API Error:", e);
-      }
+        const res = await fetch(`${API}/api/cdek/cities?q=${encodeURIComponent(q)}`)
+        const data = await res.json()
+        setCityResults(data)
+      } catch (e) {}
     }, 500)
   }
 
@@ -253,54 +313,60 @@ function App() {
     setSelectedDelivery(null)
   }
 
-  // 2. Поиск улицы через DaData (чтобы вытащить координаты для ПВЗ)
+  // Поиск улицы через DaData
   const searchStreet = async (q) => {
     setStreetSearch(q)
     if (q.length < 3 || !selectedCity) { setStreetResults([]); return }
     try {
-      const res = await fetch("https://suggestions.dadata.ru/suggestions/api/4_1/rs/suggest/address", {
-        method: "POST",
-        headers: { 
-          "Content-Type": "application/json", 
-          "Authorization": "f857f124c478d8cd818f19af870979240a757e0d" // <-- ВАЖНО: ТВОЙ ТОКЕН DADATA
-        },
-        body: JSON.stringify({ query: `${selectedCity.name} ${q}`, count: 5 })
-      })
+      const res = await fetch(`${API}/api/dadata/suggest?city=${encodeURIComponent(selectedCity.name)}&q=${encodeURIComponent(q)}`)
       const data = await res.json()
-      setStreetResults(data.suggestions || [])
+      setStreetResults(data)
     } catch (e) { console.error(e) }
   }
 
-  // 3. Выбор улицы, расчет дистанции и загрузка 10 ПВЗ
+  // Выбор улицы – получаем координаты и загружаем ближайшие ПВЗ
   const selectStreet = async (suggestion) => {
     setStreetSearch(suggestion.value)
     setStreetResults([])
     setSelectedPvz(null)
     setDeliveryOptions([])
     setSelectedDelivery(null)
-    
-    const lat = suggestion.data.geo_lat
-    const lon = suggestion.data.geo_lon
-    setUserCoords({ lat, lon })
+
+    // Получаем координаты из ответа DaData (они есть в unrestricted_value)
+    try {
+      const res = await fetch('https://suggestions.dadata.ru/suggestions/api/4_1/rs/findById/address', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Token f857f124c478d8cd818f19af870979240a757e0d'
+        },
+        body: JSON.stringify({ query: suggestion.unrestricted_value })
+      })
+      const data = await res.json()
+      if (data.suggestions && data.suggestions[0]) {
+        const coords = data.suggestions[0].data.geo_lat && data.suggestions[0].data.geo_lon
+          ? { lat: parseFloat(data.suggestions[0].data.geo_lat), lon: parseFloat(data.suggestions[0].data.geo_lon) }
+          : null
+        setUserCoords(coords)
+      }
+    } catch (e) {}
 
     setPvzLoading(true)
     try {
       const res = await fetch(`${API}/api/cdek/pvz?city_code=${selectedCity.code}`)
       const allPvz = await res.json()
-      
+      // Рассчитываем расстояние, если есть координаты пользователя
       const withDistance = allPvz.map(pvz => {
-        const pLat = parseFloat(pvz.coordY || pvz.location?.latitude);
-        const pLon = parseFloat(pvz.coordX || pvz.location?.longitude);
-        if (!pLat || !pLon || !lat || !lon) return { ...pvz, distance: 999 };
-        
+        const pLat = parseFloat(pvz.lat)
+        const pLon = parseFloat(pvz.lon)
+        if (!userCoords || !pLat || !pLon) return { ...pvz, distance: 999 }
         const d = 2 * 6371 * Math.asin(Math.sqrt(
-          Math.pow(Math.sin((pLat - lat) * Math.PI / 360), 2) +
-          Math.cos(lat * Math.PI / 180) * Math.cos(pLat * Math.PI / 180) *
-          Math.pow(Math.sin((pLon - lon) * Math.PI / 360), 2)
-        ));
+          Math.pow(Math.sin((pLat - userCoords.lat) * Math.PI / 360), 2) +
+          Math.cos(userCoords.lat * Math.PI / 180) * Math.cos(pLat * Math.PI / 180) *
+          Math.pow(Math.sin((pLon - userCoords.lon) * Math.PI / 360), 2)
+        ))
         return { ...pvz, distance: d }
       })
-      
       setPvzList(withDistance.sort((a, b) => a.distance - b.distance).slice(0, 10))
     } catch (e) { console.error(e) }
     setPvzLoading(false)
@@ -318,7 +384,13 @@ function App() {
         body: JSON.stringify({
           city_code: selectedCity.code,
           pvz_code: pvz.code,
-          items: cart.map(i => ({ price: i.price, weight: i.weight || 300, qty: 1 }))
+          items: cart.map(item => ({
+            price: item.price,
+            weight: item.weight || 300,
+            length: item.length || 30,
+            width: item.width || 40,
+            height: item.height || 3
+          }))
         })
       })
       setDeliveryOptions(await res.json())
@@ -648,9 +720,16 @@ function App() {
                     {pvzList.length > 0 && !pvzLoading && (
                       <>
                         <Text style={{ fontSize: '13px', color: '#888', marginBottom: '8px', display: 'block' }}>
-                          3. Выберите удобный пункт выдачи (топ-10 ближайших):
+                          3. Выберите пункт выдачи на карте или из списка:
                         </Text>
-                        <div style={{ maxHeight: '300px', overflowY: 'auto', border: '1px solid #333', borderRadius: '8px', marginBottom: '16px' }}>
+                        {/* ===== КАРТА ===== */}
+                        <PvzMap
+                          pvzList={pvzList}
+                          selectedPvz={selectedPvz}
+                          onSelectPvz={selectPvz}
+                          userCoords={userCoords}
+                        />
+                        <div style={{ maxHeight: '200px', overflowY: 'auto', border: '1px solid #333', borderRadius: '8px', marginBottom: '16px' }}>
                           {pvzList.map(pvz => (
                             <div key={pvz.code} onClick={() => selectPvz(pvz)}
                               style={{ padding: '10px 12px', cursor: 'pointer', borderBottom: '1px solid #222', background: selectedPvz?.code === pvz.code ? '#1a3a1a' : 'transparent' }}>
