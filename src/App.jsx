@@ -111,6 +111,7 @@ function App() {
   const [selectedDelivery, setSelectedDelivery] = useState(null)
   const [checkoutStep, setCheckoutStep] = useState(1) // 1=город/пвз, 2=данные
   const [showCancelDialog, setShowCancelDialog] = useState(false)
+  const citySearchTimer = useRef(null)
 
   useEffect(() => {
     bridge.send('VKWebAppInit').catch(() => {})
@@ -172,21 +173,16 @@ function App() {
   const searchCity = (q) => {
     setCitySearch(q)
     if (q.length < 2) { setCityResults([]); return }
-    const callbackName = 'cdekCallback_' + Date.now()
-    window[callbackName] = (data) => {
-      const cities = (data || []).map(c => ({
-        code: c.id,
-        name: c.name,
-        region: c.region || ''
-      }))
-      setCityResults(cities)
-      delete window[callbackName]
-      document.getElementById(callbackName)?.remove()
-    }
-    const script = document.createElement('script')
-    script.id = callbackName
-    script.src = `https://api.cdek.ru/city/getListByTerm/jsonp.php?q=${encodeURIComponent(q)}&callback=${callbackName}`
-    document.head.appendChild(script)
+    clearTimeout(citySearchTimer.current)
+    citySearchTimer.current = setTimeout(async () => {
+      try {
+        const res = await fetch(`${API}/api/cdek/cities?q=${encodeURIComponent(q)}`)
+        const data = await res.json()
+        setCityResults(Array.isArray(data) ? data : [])
+      } catch {
+        setCityResults([])
+      }
+    }, 400)
   }
 
   const selectCity = async (city) => {

@@ -145,11 +145,15 @@ app.get('/api/orders/user/:vk_id', (req, res) => {
 })
 
 app.post('/api/orders', (req, res) => {
-  const { items, total, name, phone, address, vk_id, promo_code, promo_discount, promo_fixed } = req.body
+  const { items, total, name, phone, address, vk_id, promo_code, promo_discount, promo_fixed,
+          delivery_city, delivery_pvz, delivery_type, delivery_cost } = req.body
   const result = run(
-    `INSERT INTO orders (items, total, name, phone, address, vk_id, promo_code, promo_discount, promo_fixed)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [JSON.stringify(items), total, name, phone, address||'СДЭК', vk_id||null, promo_code||null, promo_discount||null, promo_fixed||null]
+    `INSERT INTO orders (items, total, name, phone, address, vk_id, promo_code, promo_discount, promo_fixed,
+                         delivery_city, delivery_pvz, delivery_type, delivery_cost)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [JSON.stringify(items), total, name, phone, address||'СДЭК', vk_id||null,
+     promo_code||null, promo_discount||null, promo_fixed||null,
+     delivery_city||null, delivery_pvz||null, delivery_type||null, delivery_cost||null]
   )
   if (promo_code) {
     try { run('UPDATE promocodes SET used_count = used_count + 1 WHERE code = ?', [promo_code]) } catch(e) {}
@@ -215,20 +219,37 @@ app.delete('/api/promocodes/:id', (req, res) => {
 // ============ СДЭК ============
 const https = require('https')
 
-async function cdekRequest(method, url, data = null) {
+// Кэш токена CDEK
+let cdekTokenCache = { token: null, expiresAt: 0 }
+
+async function getCdekToken() {
   const CDEK_CLIENT_ID = process.env.CDEK_CLIENT_ID
   const CDEK_CLIENT_SECRET = process.env.CDEK_CLIENT_SECRET
   const CDEK_API_URL = process.env.CDEK_API_URL || 'https://api.cdek.ru/v2'
 
-  // Получаем токен
+  if (cdekTokenCache.token && Date.now() < cdekTokenCache.expiresAt) {
+    return cdekTokenCache.token
+  }
+
   const tokenRes = await fetch(`${CDEK_API_URL}/oauth/token`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: `grant_type=client_credentials&client_id=${CDEK_CLIENT_ID}&client_secret=${CDEK_CLIENT_SECRET}`
   })
   const tokenData = await tokenRes.json()
-  const token = tokenData.access_token
-  if (!token) throw new Error('CDEK token failed')
+  if (!tokenData.access_token) throw new Error('CDEK token failed')
+
+  // Токен живёт 3600 сек, обновляем за 60 сек до истечения
+  cdekTokenCache = {
+    token: tokenData.access_token,
+    expiresAt: Date.now() + (tokenData.expires_in - 60) * 1000
+  }
+  return cdekTokenCache.token
+}
+
+async function cdekRequest(method, url, data = null) {
+  const CDEK_API_URL = process.env.CDEK_API_URL || 'https://api.cdek.ru/v2'
+  const token = await getCdekToken()
 
   const options = {
     method,
