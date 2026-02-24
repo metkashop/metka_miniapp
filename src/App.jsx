@@ -549,19 +549,20 @@ function App() {
                           </div>
                         )}
                         {estimateLoading && (
-                          <div style={{ display: 'flex', justifyContent: 'center', padding: '12px' }}><Spinner size="small" /></div>
+                          <div style={{ display: 'flex', justifyContent: 'center', padding: '12px' }}><Spinner /></div>
                         )}
-                        {deliveryEstimate && !estimateLoading && (
-                          deliveryEstimate.error
-                            ? <Text style={{ color: '#e24a4a', fontSize: '13px', marginTop: '8px', display: 'block' }}>Не удалось рассчитать доставку</Text>
-                            : <div style={{ marginTop: '10px', padding: '10px', background: '#0a2a0a', border: '1px solid #44aa44', borderRadius: '8px' }}>
-                                <Text style={{ color: '#88ff88', fontSize: '13px' }}>
-                                  Доставка в <strong>{cartCity?.name}</strong>: от <strong>{deliveryEstimate.cost} ₽</strong>
-                                </Text>
-                                <Text style={{ color: '#666', fontSize: '11px', display: 'block', marginTop: '2px' }}>
-                                  ≈ {deliveryEstimate.days} дней · Точная стоимость при выборе ПВЗ
-                                </Text>
-                              </div>
+                        {deliveryEstimate && !estimateLoading && deliveryEstimate.error && (
+                          <Text style={{ color: '#e24a4a', fontSize: '13px', marginTop: '8px', display: 'block' }}>Не удалось рассчитать доставку</Text>
+                        )}
+                        {deliveryEstimate && !estimateLoading && !deliveryEstimate.error && (
+                          <div style={{ marginTop: '10px', padding: '10px', background: '#0a2a0a', border: '1px solid #44aa44', borderRadius: '8px' }}>
+                            <Text style={{ color: '#88ff88', fontSize: '13px' }}>
+                              Доставка в <strong>{cartCity?.name}</strong>: от <strong>{deliveryEstimate.cost} ₽</strong>
+                            </Text>
+                            <Text style={{ color: '#666', fontSize: '11px', display: 'block', marginTop: '2px' }}>
+                              ≈ {deliveryEstimate.days} дней · Точная стоимость при выборе ПВЗ
+                            </Text>
+                          </div>
                         )}
                       </div>
 
