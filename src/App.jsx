@@ -99,10 +99,14 @@ function App() {
   const [promoError, setPromoError] = useState('')
   const [promoLoading, setPromoLoading] = useState(false)
 
-  // СДЭК
+  // СДЭК и Адреса
   const [citySearch, setCitySearch] = useState('')
   const [cityResults, setCityResults] = useState([])
   const [selectedCity, setSelectedCity] = useState(null)
+  const [streetSearch, setStreetSearch] = useState('')
+  const [streetResults, setStreetResults] = useState([])
+  const [userCoords, setUserCoords] = useState(null)
+  
   const [pvzList, setPvzList] = useState([])
   const [pvzLoading, setPvzLoading] = useState(false)
   const [selectedPvz, setSelectedPvz] = useState(null)
@@ -111,7 +115,6 @@ function App() {
   const [selectedDelivery, setSelectedDelivery] = useState(null)
   const [checkoutStep, setCheckoutStep] = useState(1) // 1=город/пвз, 2=данные
   const [showCancelDialog, setShowCancelDialog] = useState(false)
-  const citySearchTimer = useRef(null)
 
   useEffect(() => {
     bridge.send('VKWebAppInit').catch(() => {})
@@ -169,34 +172,92 @@ function App() {
 
   const removePromo = () => { setPromoApplied(null); setPromoCode(''); setPromoError('') }
 
-  // СДЭК функции
+  // 1. Поиск города (оставляем JSONP СДЭКа)
   const searchCity = (q) => {
     setCitySearch(q)
     if (q.length < 2) { setCityResults([]); return }
-    clearTimeout(citySearchTimer.current)
-    citySearchTimer.current = setTimeout(async () => {
-      try {
-        const res = await fetch(`${API}/api/cdek/cities?q=${encodeURIComponent(q)}`)
-        const data = await res.json()
-        setCityResults(Array.isArray(data) ? data : [])
-      } catch {
-        setCityResults([])
-      }
-    }, 400)
+    const callbackName = 'cdekCallback_' + Date.now()
+    window[callbackName] = (data) => {
+      const cities = (data || []).map(c => ({
+        code: c.id,
+        name: c.name,
+        region: c.region || ''
+      }))
+      setCityResults(cities)
+      delete window[callbackName]
+      document.getElementById(callbackName)?.remove()
+    }
+    const script = document.createElement('script')
+    script.id = callbackName
+    script.src = `https://api.cdek.ru/city/getListByTerm/jsonp.php?q=${encodeURIComponent(q)}&callback=${callbackName}`
+    document.head.appendChild(script)
   }
 
-  const selectCity = async (city) => {
+  // Выбор города и сброс всего остального
+  const selectCity = (city) => {
     setSelectedCity(city)
     setCitySearch(city.name)
     setCityResults([])
+    setStreetSearch('')
+    setStreetResults([])
+    setPvzList([])
     setSelectedPvz(null)
     setDeliveryOptions([])
     setSelectedDelivery(null)
+  }
+
+  // 2. Поиск улицы через DaData
+  const searchStreet = async (q) => {
+    setStreetSearch(q)
+    if (q.length < 3 || !selectedCity) { setStreetResults([]); return }
+    try {
+      const res = await fetch("https://suggestions.dadata.ru/suggestions/api/4_1/rs/suggest/address", {
+        method: "POST",
+        headers: { 
+          "Content-Type": "application/json", 
+          "Authorization": "f857f124c478d8cd818f19af870979240a757e0d" // ВНИМАНИЕ: Замени на свой ключ!
+        },
+        body: JSON.stringify({ query: `${selectedCity.name} ${q}`, count: 5 })
+      })
+      const data = await res.json()
+      setStreetResults(data.suggestions || [])
+    } catch (e) { console.error(e) }
+  }
+
+  // 3. Выбор улицы, расчет дистанции и загрузка 10 ПВЗ
+  const selectStreet = async (suggestion) => {
+    setStreetSearch(suggestion.value)
+    setStreetResults([])
+    setSelectedPvz(null)
+    setDeliveryOptions([])
+    setSelectedDelivery(null)
+    
+    const lat = suggestion.data.geo_lat
+    const lon = suggestion.data.geo_lon
+    setUserCoords({ lat, lon })
+
     setPvzLoading(true)
     try {
-      const res = await fetch(`${API}/api/cdek/pvz?city_code=${city.code}`)
-      setPvzList(await res.json())
-    } catch {}
+      const res = await fetch(`${API}/api/cdek/pvz?city_code=${selectedCity.code}`)
+      const allPvz = await res.json()
+      
+      // Расчет дистанции по формуле Гаверсинуса
+      const withDistance = allPvz.map(pvz => {
+        const pLat = parseFloat(pvz.coordY);
+        const pLon = parseFloat(pvz.coordX);
+        if (!pLat || !pLon || !lat || !lon) return { ...pvz, distance: 999 };
+        
+        const d = 2 * 6371 * Math.asin(Math.sqrt(
+          Math.pow(Math.sin((pLat - lat) * Math.PI / 360), 2) +
+          Math.cos(lat * Math.PI / 180) * Math.cos(pLat * Math.PI / 180) *
+          Math.pow(Math.sin((pLon - lon) * Math.PI / 360), 2)
+        ));
+        return { ...pvz, distance: d }
+      })
+      
+      // Берем 10 ближайших
+      setPvzList(withDistance.sort((a, b) => a.distance - b.distance).slice(0, 10))
+    } catch (e) { console.error(e) }
     setPvzLoading(false)
   }
 
@@ -230,6 +291,8 @@ function App() {
     setCheckoutStep(1)
     setSelectedCity(null)
     setCitySearch('')
+    setStreetSearch('')
+    setPvzList([])
     setSelectedPvz(null)
     setDeliveryOptions([])
     setSelectedDelivery(null)
@@ -246,7 +309,9 @@ function App() {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        items: cart, total: total + selectedDelivery.cost, name,
+        items: cart, 
+        total: total + (selectedDelivery?.cost || 0), // Учли доставку в ИТОГО
+        name,
         phone: form.phone,
         address: selectedPvz.address,
         vk_id: vkUser?.id || null,
@@ -269,6 +334,8 @@ function App() {
         setCheckoutStep(1)
         setSelectedCity(null)
         setCitySearch('')
+        setStreetSearch('')
+        setPvzList([])
         setSelectedPvz(null)
         setDeliveryOptions([])
         setSelectedDelivery(null)
@@ -297,23 +364,21 @@ function App() {
         <AppRoot>
           <View activePanel={activePanel}>
 
-           <Panel id="splash">
-             <div 
-               onClick={() => setActivePanel('catalog')} 
-               style={{ 
-                 height: '100vh', 
-                 cursor: 'pointer', 
-                 /* Загружаем картинку фоном */
-                 backgroundImage: `url(${API}/img/cover/cover.jpg)`,
-                 /* COVER — заполнит весь экран без дырок по бокам */
-                 backgroundSize: 'cover',
-                 /* Прижимаем к низу, чтобы "пожертвовать" верхушкой, как ты и хотел */
-                 backgroundPosition: 'center bottom',
-                 backgroundRepeat: 'no-repeat',
-                 backgroundColor: '#111'
-               }} 
-             />
-           </Panel>
+            <Panel id="splash">
+              {/* Исправленная верстка стартового экрана */}
+              <div 
+                onClick={() => setActivePanel('catalog')} 
+                style={{ 
+                  height: '100vh', 
+                  cursor: 'pointer', 
+                  backgroundColor: '#111',
+                  backgroundImage: `url(${API}/img/cover/cover.jpg)`,
+                  backgroundRepeat: 'no-repeat',
+                  backgroundPosition: 'center bottom',
+                  backgroundSize: typeof window !== 'undefined' && window.innerWidth < 600 ? 'contain' : 'cover'
+                }} 
+              />
+            </Panel>
 
             <Panel id="catalog">
               <PanelHeader after={cartButton}>METKA SHOP</PanelHeader>
@@ -428,7 +493,6 @@ function App() {
               <PanelHeader before={<PanelHeaderBack onClick={() => setActivePanel('cart')} />}>Оформление</PanelHeader>
               <div style={{ padding: '16px' }}>
 
-                {/* Диалог отмены */}
                 {showCancelDialog && (
                   <div style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', background: 'rgba(0,0,0,0.7)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px', boxSizing: 'border-box' }}>
                     <div style={{ background: '#1a1a1a', borderRadius: '12px', padding: '24px', maxWidth: '320px', width: '100%' }}>
@@ -443,14 +507,14 @@ function App() {
                   </div>
                 )}
 
-                {/* Шаг 1: Выбор города и ПВЗ */}
+                {/* Шаг 1: Обновленный выбор Город -> Улица -> ПВЗ -> Тариф */}
                 {checkoutStep === 1 && (
                   <>
                     <div style={{ background: '#1a1a2e', border: '1px solid #4a4aaa44', borderRadius: '8px', padding: '12px', marginBottom: '16px' }}>
-                      <Text style={{ color: '#aaaaff', fontSize: '13px' }}>📦 Шаг 1 из 2 — Выберите пункт выдачи СДЭК</Text>
+                      <Text style={{ color: '#aaaaff', fontSize: '13px' }}>📦 Шаг 1 из 2 — Где вам удобнее забрать заказ?</Text>
                     </div>
 
-                    <FormItem top="Город">
+                    <FormItem top="1. Выберите город">
                       <Input
                         placeholder="Начните вводить название города"
                         value={citySearch}
@@ -470,18 +534,40 @@ function App() {
                       </div>
                     )}
 
+                    {selectedCity && (
+                      <FormItem top="2. Введите вашу улицу (найдем ближайшие ПВЗ)">
+                        <Input
+                          placeholder="Например: Ленина"
+                          value={streetSearch}
+                          onChange={e => searchStreet(e.target.value)}
+                        />
+                      </FormItem>
+                    )}
+
+                    {streetResults.length > 0 && (
+                      <div style={{ background: '#1a1a1a', border: '1px solid #333', borderRadius: '8px', marginBottom: '16px', overflow: 'hidden' }}>
+                        {streetResults.map((street, i) => (
+                          <div key={i} onClick={() => selectStreet(street)}
+                            style={{ padding: '10px 12px', cursor: 'pointer', borderBottom: '1px solid #222' }}>
+                            <Text style={{ fontSize: '13px' }}>{street.value}</Text>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
                     {pvzLoading && <div style={{ display: 'flex', justifyContent: 'center', padding: '20px' }}><Spinner /></div>}
 
                     {pvzList.length > 0 && !pvzLoading && (
                       <>
                         <Text style={{ fontSize: '13px', color: '#888', marginBottom: '8px', display: 'block' }}>
-                          Пунктов выдачи: {pvzList.length}. Выберите удобный:
+                          3. Выберите удобный пункт выдачи (топ-10 ближайших):
                         </Text>
                         <div style={{ maxHeight: '300px', overflowY: 'auto', border: '1px solid #333', borderRadius: '8px', marginBottom: '16px' }}>
                           {pvzList.map(pvz => (
                             <div key={pvz.code} onClick={() => selectPvz(pvz)}
                               style={{ padding: '10px 12px', cursor: 'pointer', borderBottom: '1px solid #222', background: selectedPvz?.code === pvz.code ? '#1a3a1a' : 'transparent' }}>
                               <Text style={{ fontSize: '13px', fontWeight: selectedPvz?.code === pvz.code ? '600' : '400' }}>{pvz.address}</Text>
+                              <Text style={{ fontSize: '11px', color: '#44cc88', marginTop: '2px' }}>≈ {pvz.distance.toFixed(1)} км от вас</Text>
                               {pvz.work_time && <Text style={{ fontSize: '11px', color: '#888' }}>{pvz.work_time}</Text>}
                             </div>
                           ))}
@@ -491,10 +577,13 @@ function App() {
 
                     {deliveryLoading && <div style={{ display: 'flex', justifyContent: 'center', padding: '20px' }}><Spinner /></div>}
 
-                    {deliveryOptions.length > 0 && !deliveryLoading && (
+                    {/* Фильтр тарифов: только нужные коды */}
+                    {deliveryOptions.filter(opt => [136, 234, 368, 378].includes(Number(opt.tariff_code))).length > 0 && !deliveryLoading && (
                       <>
-                        <Text style={{ fontSize: '13px', color: '#888', marginBottom: '8px', display: 'block' }}>Выберите тариф доставки:</Text>
-                        {deliveryOptions.map(opt => (
+                        <Text style={{ fontSize: '13px', color: '#888', marginBottom: '8px', display: 'block' }}>4. Выберите тариф доставки:</Text>
+                        {deliveryOptions
+                          .filter(opt => [136, 234, 368, 378].includes(Number(opt.tariff_code)))
+                          .map(opt => (
                           <div key={opt.tariff_code} onClick={() => setSelectedDelivery(opt)}
                             style={{ padding: '12px', border: `1px solid ${selectedDelivery?.tariff_code === opt.tariff_code ? '#44cc88' : '#333'}`, borderRadius: '8px', marginBottom: '8px', cursor: 'pointer', background: selectedDelivery?.tariff_code === opt.tariff_code ? '#1a3a2a' : 'transparent' }}>
                             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
