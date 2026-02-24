@@ -303,13 +303,14 @@ function App() {
                style={{ 
                  height: '100vh', 
                  cursor: 'pointer', 
-                 backgroundColor: '#111',
+                 /* Загружаем картинку фоном */
                  backgroundImage: `url(${API}/img/cover/cover.jpg)`,
+                 /* COVER — заполнит весь экран без дырок по бокам */
+                 backgroundSize: 'cover',
+                 /* Прижимаем к низу, чтобы "пожертвовать" верхушкой, как ты и хотел */
+                 backgroundPosition: 'center bottom',
                  backgroundRepeat: 'no-repeat',
-                 backgroundPosition: 'center center',
-                 /* Магия: на мобилках (ширина < 600px) показываем картинку целиком, 
-                    на широких экранах — растягиваем (cover) */
-                 backgroundSize: window.innerWidth < 600 ? 'contain' : 'cover'
+                 backgroundColor: '#111'
                }} 
              />
            </Panel>
