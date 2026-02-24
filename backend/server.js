@@ -1,3 +1,4 @@
+require('dotenv').config()
 const express = require('express')
 const cors = require('cors')
 const Database = require('better-sqlite3')
@@ -10,6 +11,32 @@ app.use(cors())
 app.use(express.json())
 app.use(express.static(__dirname))
 app.use('/img', express.static(path.join(__dirname, '../img')))
+
+// CDEK API — ключи читаются из backend/.env
+const CDEK_CLIENT_ID = process.env.CDEK_CLIENT_ID
+const CDEK_CLIENT_SECRET = process.env.CDEK_CLIENT_SECRET
+const CDEK_API = 'https://api.cdek.ru/v2'
+const CDEK_FROM_CITY = parseInt(process.env.CDEK_FROM_CITY || '44', 10)
+
+let cdekToken = null
+let cdekTokenExpiry = 0
+
+async function getCdekToken() {
+  if (cdekToken && Date.now() < cdekTokenExpiry) return cdekToken
+  const res = await fetch(`${CDEK_API}/oauth/token`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      grant_type: 'client_credentials',
+      client_id: CDEK_CLIENT_ID,
+      client_secret: CDEK_CLIENT_SECRET,
+    }),
+  })
+  const data = await res.json()
+  cdekToken = data.access_token
+  cdekTokenExpiry = Date.now() + (data.expires_in - 60) * 1000
+  return cdekToken
+}
 
 // Таблицы
 db.exec(`
@@ -98,10 +125,11 @@ app.get('/api/orders', (req, res) => {
 })
 
 app.post('/api/orders', (req, res) => {
-  const { items, total, name, phone, address, vk_id, promo_code, promo_discount, promo_fixed } = req.body
+  const { items, total, name, phone, address, vk_id, promo_code, promo_discount, promo_fixed,
+    delivery_city, delivery_pvz, delivery_type, delivery_cost } = req.body
   const result = db.prepare(
-    `INSERT INTO orders (items, total, name, phone, address, vk_id, promo_code, promo_discount, promo_fixed)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO orders (items, total, name, phone, address, vk_id, promo_code, promo_discount, promo_fixed, delivery_city, delivery_pvz, delivery_type, delivery_cost)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     JSON.stringify(items),
     total,
@@ -111,7 +139,11 @@ app.post('/api/orders', (req, res) => {
     vk_id || null,
     promo_code || null,
     promo_discount || null,
-    promo_fixed || null
+    promo_fixed || null,
+    delivery_city || null,
+    delivery_pvz || null,
+    delivery_type || null,
+    delivery_cost || null,
   )
 
   // Увеличиваем счётчик использований промокода
@@ -174,6 +206,60 @@ app.post('/api/promocodes', (req, res) => {
 app.delete('/api/promocodes/:id', (req, res) => {
   db.prepare('DELETE FROM promocodes WHERE id = ?').run(req.params.id)
   res.json({ ok: true })
+})
+
+// CDEK — поиск городов
+app.get('/api/cdek/cities', async (req, res) => {
+  try {
+    const token = await getCdekToken()
+    const q = req.query.q || ''
+    const r = await fetch(
+      `${CDEK_API}/location/cities?name=${encodeURIComponent(q)}&country_codes=RU&size=10`,
+      { headers: { Authorization: `Bearer ${token}` } }
+    )
+    const data = await r.json()
+    res.json(Array.isArray(data) ? data : [])
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+// CDEK — список ПВЗ по коду города
+app.get('/api/cdek/pvz', async (req, res) => {
+  try {
+    const token = await getCdekToken()
+    const { city_code } = req.query
+    const r = await fetch(
+      `${CDEK_API}/deliverypoints?city_code=${city_code}&type=PVZ&size=100`,
+      { headers: { Authorization: `Bearer ${token}` } }
+    )
+    const data = await r.json()
+    res.json(Array.isArray(data) ? data : [])
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+// CDEK — расчёт стоимости доставки
+app.post('/api/cdek/calculate', async (req, res) => {
+  try {
+    const token = await getCdekToken()
+    const { to_city_code, weight } = req.body
+    const r = await fetch(`${CDEK_API}/calculator/tariff`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        tariff_code: 136, // Посылка склад-склад
+        from_location: { code: CDEK_FROM_CITY },
+        to_location: { code: to_city_code },
+        packages: [{ weight: weight || 500, length: 20, width: 15, height: 5 }],
+      }),
+    })
+    const data = await r.json()
+    res.json(data)
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
 })
 
 app.listen(3001, () => {

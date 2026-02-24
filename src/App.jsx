@@ -4,8 +4,8 @@ import { Icon28ShoppingCartOutline, Icon28FavoriteOutline, Icon28Favorite, Icon2
 import bridge from '@vkontakte/vk-bridge'
 import '@vkontakte/vkui/dist/vkui.css'
 
-const API = typeof window !== 'undefined' && window.location.hostname !== 'localhost' 
-  ? '' 
+const API = typeof window !== 'undefined' && window.location.hostname !== 'localhost'
+  ? ''
   : 'http://192.168.1.2:3001'
 
 function Lightbox({ src, onClose }) {
@@ -98,6 +98,16 @@ function App() {
   const [promoApplied, setPromoApplied] = useState(null)
   const [promoError, setPromoError] = useState('')
   const [promoLoading, setPromoLoading] = useState(false)
+  // CDEK доставка
+  const [cityQuery, setCityQuery] = useState('')
+  const [cityResults, setCityResults] = useState([])
+  const [citySearching, setCitySearching] = useState(false)
+  const [selectedCity, setSelectedCity] = useState(null)
+  const [pvzList, setPvzList] = useState([])
+  const [pvzLoading, setPvzLoading] = useState(false)
+  const [selectedPvz, setSelectedPvz] = useState(null)
+  const [deliveryCost, setDeliveryCost] = useState(null)
+  const [deliveryLoading, setDeliveryLoading] = useState(false)
 
   useEffect(() => {
     bridge.send('VKWebAppInit').catch(() => {})
@@ -110,6 +120,24 @@ function App() {
       .then(data => { setProducts(data); setLoading(false) })
   }, [])
 
+  // Поиск города СДЭК с дебаунсом
+  useEffect(() => {
+    if (!cityQuery || cityQuery.length < 2 || selectedCity) {
+      if (!selectedCity) setCityResults([])
+      return
+    }
+    const timer = setTimeout(async () => {
+      setCitySearching(true)
+      try {
+        const res = await fetch(`${API}/api/cdek/cities?q=${encodeURIComponent(cityQuery)}`)
+        const data = await res.json()
+        setCityResults(Array.isArray(data) ? data : [])
+      } catch { setCityResults([]) }
+      setCitySearching(false)
+    }, 500)
+    return () => clearTimeout(timer)
+  }, [cityQuery, selectedCity])
+
   const addToCart = (product) => {
     setCart(prev => [...prev, { ...product, cartId: Date.now() }])
     setSnackbar(`${product.name} (${product.size}) добавлена в корзину!`)
@@ -118,7 +146,10 @@ function App() {
   const removeFromCart = (cartId) => {
     setCart(prev => {
       const newCart = prev.filter(item => item.cartId !== cartId)
-      if (newCart.length === 0) { setPromoApplied(null); setPromoCode(''); setActivePanel('catalog') }
+      if (newCart.length === 0) {
+        setPromoApplied(null); setPromoCode(''); setActivePanel('catalog')
+        setSelectedCity(null); setSelectedPvz(null); setDeliveryCost(null); setCityQuery('')
+      }
       return newCart
     })
   }
@@ -132,6 +163,7 @@ function App() {
       : Math.min(promoApplied.discount, subtotal)
     : 0
   const total = subtotal - discount
+  const grandTotal = total + (deliveryCost || 0)
 
   const applyPromo = async () => {
     if (!promoCode.trim()) return
@@ -155,23 +187,74 @@ function App() {
 
   const removePromo = () => { setPromoApplied(null); setPromoCode(''); setPromoError('') }
 
+  const handleCityChange = (e) => {
+    setCityQuery(e.target.value)
+    if (selectedCity) {
+      setSelectedCity(null)
+      setSelectedPvz(null)
+      setDeliveryCost(null)
+      setPvzList([])
+    }
+  }
+
+  const selectCity = async (city) => {
+    setSelectedCity(city)
+    setCityQuery(`${city.city}${city.region ? ', ' + city.region : ''}`)
+    setCityResults([])
+    setSelectedPvz(null)
+    setDeliveryCost(null)
+    setPvzLoading(true)
+    try {
+      const res = await fetch(`${API}/api/cdek/pvz?city_code=${city.code}`)
+      const data = await res.json()
+      setPvzList(Array.isArray(data) ? data : [])
+    } catch { setPvzList([]) }
+    setPvzLoading(false)
+    setActivePanel('pvz')
+  }
+
+  const selectPvz = async (pvz) => {
+    setSelectedPvz(pvz)
+    setActivePanel('checkout')
+    if (!selectedCity) return
+    setDeliveryLoading(true)
+    try {
+      const totalWeight = cart.reduce((sum, item) => sum + (item.weight || 500), 0)
+      const res = await fetch(`${API}/api/cdek/calculate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ to_city_code: selectedCity.code, weight: totalWeight }),
+      })
+      const data = await res.json()
+      setDeliveryCost(data.total_sum || null)
+    } catch { setDeliveryCost(null) }
+    setDeliveryLoading(false)
+  }
+
   const submitOrder = () => {
     if (!form.firstName || !form.lastName || !form.phone) { setSnackbar('Заполните все поля!'); return }
     if (!agreePolicy) { setSnackbar('Необходимо согласие с политикой обработки данных!'); return }
+    if (!selectedCity || !selectedPvz) { setSnackbar('Выберите пункт выдачи СДЭК!'); return }
     setSubmitting(true)
     const name = `${form.lastName} ${form.firstName}`
     fetch(`${API}/api/orders`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        items: cart, total, name,
+        items: cart,
+        total: grandTotal,
+        name,
         phone: form.phone,
-        address: 'СДЭК',
+        address: selectedPvz.location?.address_full || selectedPvz.location?.address || selectedPvz.name,
         vk_id: vkUser?.id || null,
         promo_code: promoApplied ? promoCode : null,
         promo_discount: promoApplied?.type === 'percent' ? promoApplied.discount : null,
         promo_fixed: promoApplied?.type === 'fixed' ? promoApplied.discount : null,
-      })
+        delivery_city: selectedCity.city,
+        delivery_pvz: selectedPvz.code,
+        delivery_type: 'Посылка склад-склад (136)',
+        delivery_cost: deliveryCost || 0,
+      }),
     })
       .then(res => res.json())
       .then(data => {
@@ -180,6 +263,10 @@ function App() {
         setAgreePolicy(false)
         setPromoApplied(null)
         setPromoCode('')
+        setSelectedCity(null)
+        setSelectedPvz(null)
+        setDeliveryCost(null)
+        setCityQuery('')
         setActivePanel('catalog')
         setSnackbar(`Заказ №${data.id} оформлен! Мы свяжемся с вами.`)
         setSubmitting(false)
@@ -343,6 +430,74 @@ function App() {
                 <FormItem top="Телефон">
                   <Input placeholder="+7 900 000 00 00" value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} />
                 </FormItem>
+
+                {/* Доставка СДЭК */}
+                <FormItem top="Город доставки">
+                  <Input
+                    placeholder="Начните вводить город..."
+                    value={cityQuery}
+                    onChange={handleCityChange}
+                    after={citySearching ? <Spinner size="small" /> : null}
+                  />
+                  {cityResults.length > 0 && (
+                    <div style={{ background: '#2a2a2a', border: '1px solid #444', borderRadius: '8px', marginTop: '4px', overflow: 'hidden' }}>
+                      {cityResults.map(city => (
+                        <div
+                          key={city.code}
+                          onClick={() => selectCity(city)}
+                          style={{ padding: '10px 14px', cursor: 'pointer', borderBottom: '1px solid #333', fontSize: '14px' }}
+                        >
+                          <span style={{ color: '#fff' }}>{city.city}</span>
+                          {city.region && <span style={{ color: '#888', fontSize: '12px' }}>, {city.region}</span>}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </FormItem>
+
+                {selectedCity && (
+                  <div style={{ margin: '-4px 0 16px 0' }}>
+                    {!selectedPvz ? (
+                      <Button
+                        size="m"
+                        mode="secondary"
+                        stretched
+                        onClick={() => setActivePanel('pvz')}
+                        loading={pvzLoading}
+                      >
+                        {pvzLoading ? 'Загружаем пункты выдачи...' : 'Выбрать пункт выдачи СДЭК →'}
+                      </Button>
+                    ) : (
+                      <div style={{ background: '#1a2a1a', border: '1px solid #44cc8844', borderRadius: '8px', padding: '12px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                          <div style={{ flex: 1 }}>
+                            <Text style={{ color: '#44cc88', fontSize: '12px', marginBottom: '4px' }}>✓ Пункт выдачи выбран</Text>
+                            <Text style={{ fontSize: '13px', color: '#fff' }}>{selectedPvz.location?.address || selectedPvz.name}</Text>
+                            {selectedPvz.work_time && (
+                              <Text style={{ color: '#888', fontSize: '11px', marginTop: '2px' }}>{selectedPvz.work_time}</Text>
+                            )}
+                            {deliveryLoading && (
+                              <Text style={{ color: '#888', fontSize: '12px', marginTop: '4px' }}>Считаем стоимость доставки...</Text>
+                            )}
+                            {!deliveryLoading && deliveryCost !== null && (
+                              <Text style={{ color: '#ffaa44', fontSize: '13px', marginTop: '4px' }}>Доставка: {deliveryCost} ₽</Text>
+                            )}
+                            {!deliveryLoading && deliveryCost === null && (
+                              <Text style={{ color: '#888', fontSize: '12px', marginTop: '4px' }}>Стоимость доставки уточняется</Text>
+                            )}
+                          </div>
+                          <button
+                            onClick={() => setActivePanel('pvz')}
+                            style={{ background: 'none', border: 'none', color: '#5b9cf6', cursor: 'pointer', fontSize: '12px', padding: '0 0 0 8px', whiteSpace: 'nowrap' }}
+                          >
+                            Изменить
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 <div style={{ padding: '8px 0 16px' }}>
                   <Checkbox checked={agreePolicy} onChange={e => setAgreePolicy(e.target.checked)}>
                     <Text style={{ fontSize: '12px' }}>
@@ -364,15 +519,68 @@ function App() {
                       <Text style={{ color: '#44cc88', fontSize: '13px' }}>−{discount} ₽</Text>
                     </div>
                   )}
-                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  {deliveryCost !== null && (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                      <Text style={{ color: '#888', fontSize: '13px' }}>Доставка СДЭК</Text>
+                      <Text style={{ fontSize: '13px' }}>{deliveryCost} ₽</Text>
+                    </div>
+                  )}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', paddingTop: '8px', borderTop: '1px solid #333' }}>
                     <Title level="3">Итого</Title>
-                    <Title level="3">{total} ₽</Title>
+                    <Title level="3">{grandTotal} ₽</Title>
                   </div>
                 </div>
-                <Button size="l" stretched loading={submitting} disabled={!agreePolicy} onClick={submitOrder}>
+                <Button
+                  size="l"
+                  stretched
+                  loading={submitting}
+                  disabled={!agreePolicy || !selectedCity || !selectedPvz}
+                  onClick={submitOrder}
+                >
                   Подтвердить заказ
                 </Button>
               </div>
+            </Panel>
+
+            <Panel id="pvz">
+              <PanelHeader before={<PanelHeaderBack onClick={() => setActivePanel('checkout')} />}>
+                Выбор пункта выдачи
+              </PanelHeader>
+              {selectedCity && (
+                <div style={{ padding: '10px 16px', borderBottom: '1px solid #333', background: '#2a2a2a' }}>
+                  <Text style={{ color: '#888', fontSize: '13px' }}>
+                    Город: <span style={{ color: '#fff' }}>{selectedCity.city}{selectedCity.region ? `, ${selectedCity.region}` : ''}</span>
+                  </Text>
+                </div>
+              )}
+              {pvzLoading
+                ? <div style={{ display: 'flex', justifyContent: 'center', padding: '40px' }}><Spinner /></div>
+                : pvzList.length === 0
+                  ? <div style={{ textAlign: 'center', padding: '40px' }}>
+                      <Text style={{ color: '#888' }}>Пункты выдачи не найдены</Text>
+                    </div>
+                  : <div>
+                      {pvzList.map(pvz => (
+                        <div
+                          key={pvz.code}
+                          onClick={() => selectPvz(pvz)}
+                          style={{
+                            padding: '12px 16px',
+                            borderBottom: '1px solid #2a2a2a',
+                            cursor: 'pointer',
+                            background: selectedPvz?.code === pvz.code ? '#1a2a1a' : 'transparent',
+                          }}
+                        >
+                          <Text weight="2" style={{ fontSize: '13px', color: selectedPvz?.code === pvz.code ? '#44cc88' : '#fff' }}>
+                            {selectedPvz?.code === pvz.code ? '✓ ' : ''}{pvz.location?.address || pvz.name}
+                          </Text>
+                          {pvz.work_time && (
+                            <Text style={{ color: '#888', fontSize: '11px', marginTop: '2px' }}>{pvz.work_time}</Text>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+              }
             </Panel>
 
             <Panel id="policy">
