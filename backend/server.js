@@ -255,41 +255,41 @@ async function cdekRequest(method, url, data = null) {
 }
 
 // ============ ПРОКСИ ДЛЯ ВИДЖЕТА СДЭК ============
-app.all('/api/cdek-proxy/*path', async (req, res) => {
-  try {
-    const proxyPath = req.params.path || '';
-    const targetUrl = `https://api.cdek.ru/v2/${proxyPath}`;
-
-    const token = await getCdekToken();
-
-    const fetchOptions = {
-      method: req.method,
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json'
-      }
-    };
-
-    if (['POST', 'PUT', 'PATCH'].includes(req.method)) {
-      fetchOptions.body = JSON.stringify(req.body);
-    }
-
-    const response = await fetch(targetUrl, fetchOptions);
-
-    let data;
-    const contentType = response.headers.get('content-type');
-    if (contentType && contentType.includes('application/json')) {
-      data = await response.json();
-    } else {
-      data = await response.text();
-    }
-
-    res.status(response.status).json(data);
-  } catch (error) {
-    console.error('CDEK widget proxy error:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
+//app.all('/api/cdek-proxy/*path', async (req, res) => {
+//  try {
+//    const proxyPath = req.params.path || '';
+//    const targetUrl = `https://api.cdek.ru/v2/${proxyPath}`;
+//
+//    const token = await getCdekToken();
+//
+//    const fetchOptions = {
+//      method: req.method,
+//      headers: {
+//        'Authorization': `Bearer ${token}`,
+//        'Content-Type': 'application/json'
+//      }
+//    };
+//
+//    if (['POST', 'PUT', 'PATCH'].includes(req.method)) {
+//      fetchOptions.body = JSON.stringify(req.body);
+//    }
+//
+//    const response = await fetch(targetUrl, fetchOptions);
+//
+//    let data;
+//    const contentType = response.headers.get('content-type');
+//    if (contentType && contentType.includes('application/json')) {
+//      data = await response.json();
+//    } else {
+//      data = await response.text();
+//    }
+//
+//    res.status(response.status).json(data);
+//  } catch (error) {
+//    console.error('CDEK widget proxy error:', error);
+//    res.status(500).json({ error: 'Internal server error' });
+//  }
+//});
 
 // Поиск городов СДЭК
 app.get('/api/cdek/cities', async (req, res) => {
