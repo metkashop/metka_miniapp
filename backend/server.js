@@ -254,30 +254,18 @@ async function cdekRequest(method, url, data = null) {
   return res.json()
 }
 
-// Прокси для виджета СДЭК (использует Bearer-токен)
-app.post('/api/cdek-proxy/*', async (req, res) => {
+// Прокси для виджета СДЭК (исправленная версия)
+app.post('/api/cdek-proxy/*path', async (req, res) => {
   try {
     const proxyPath = req.params.path || '';
-    const targetUrl = `https://api.cdek.ru/v2/${proxyPath}`
-
-    const token = await getCdekToken()
-
-    const response = await fetch(targetUrl, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(req.body)
-    })
-
-    const data = await response.json()
-    res.status(response.status).json(data)
+    const targetUrl = `https://api.cdek.ru/v2/${proxyPath}`;
+    // ... весь код внутри функции
+    res.status(response.status).json(data);
   } catch (error) {
-    console.error('CDEK widget proxy error:', error)
-    res.status(500).json({ error: 'Internal server error' })
+    console.error('CDEK widget proxy error:', error);
+    res.status(500).json({ error: 'Internal server error' });
   }
-})
+});
 
 // Поиск городов СДЭК
 app.get('/api/cdek/cities', async (req, res) => {
