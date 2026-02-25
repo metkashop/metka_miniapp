@@ -18,10 +18,8 @@ L.Icon.Default.mergeOptions({
 })
 
 // ===== КОМПОНЕНТ КАРТЫ =====
-function PvzMap({ pvzList, selectedPvz, onSelectPvz, userCoords }) {
-  const center = userCoords
-    ? [userCoords.lat, userCoords.lon]
-    : pvzList.length > 0
+function PvzMap({ pvzList, onSelectPvz }) {
+  const center = pvzList.length > 0
     ? [pvzList[0].lat, pvzList[0].lon]
     : [55.75, 37.62] // Москва по умолчанию
 
@@ -29,7 +27,8 @@ function PvzMap({ pvzList, selectedPvz, onSelectPvz, userCoords }) {
     <MapContainer
       center={center}
       zoom={12}
-      style={{ height: '300px', width: '100%', borderRadius: '8px', marginBottom: '16px' }}
+      scrollWheelZoom={false}
+      style={{ height: '350px', width: '100%', borderRadius: '8px', marginBottom: '16px', zIndex: 1 }}
     >
       <TileLayer
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
@@ -43,8 +42,8 @@ function PvzMap({ pvzList, selectedPvz, onSelectPvz, userCoords }) {
         >
           <Popup>
             <strong>{pvz.address}</strong><br />
-            {pvz.work_time && <>Время работы: {pvz.work_time}<br /></>}
-            {pvz.distance && <>Расстояние: {pvz.distance.toFixed(1)} км</>}
+            {pvz.work_time && <>{pvz.work_time}<br /></>}
+            {pvz.distance !== undefined && <>~{pvz.distance.toFixed(1)} км</>}
           </Popup>
         </Marker>
       ))}
@@ -164,15 +163,14 @@ function App() {
   const [selectedCity, setSelectedCity] = useState(null)
   const [streetSearch, setStreetSearch] = useState('')
   const [streetResults, setStreetResults] = useState([])
-  const [userCoords, setUserCoords] = useState(null)
-  
+
   const [pvzList, setPvzList] = useState([])
   const [pvzLoading, setPvzLoading] = useState(false)
   const [selectedPvz, setSelectedPvz] = useState(null)
   const [deliveryOptions, setDeliveryOptions] = useState([])
   const [deliveryLoading, setDeliveryLoading] = useState(false)
   const [selectedDelivery, setSelectedDelivery] = useState(null)
-  const [checkoutStep, setCheckoutStep] = useState(1) 
+  const [checkoutStep, setCheckoutStep] = useState(1)
   const [showCancelDialog, setShowCancelDialog] = useState(false)
 
   const citySearchTimer = useRef(null)
@@ -349,13 +347,47 @@ function App() {
     setDeliveryOptions([])
     setSelectedDelivery(null)
     setDeliveryLoading(true)
-    // Здесь можно добавить расчёт тарифов, если нужен
+    
+    // Рассчитываем тарифы для выбранного ПВЗ
+    try {
+      const res = await fetch(`${API}/api/cdek/calculate-pvz`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          city_code: selectedCity.code,
+          pvz_code: pvz.code,
+          items: cart.map(item => ({
+            price: item.price,
+            weight: item.weight || 300,
+            length: item.length || 30,
+            width: item.width || 40,
+            height: item.height || 3
+          }))
+        })
+      })
+      const data = await res.json()
+      setDeliveryOptions(data)
+      // Автоматически выбираем самый дешёвый тариф
+      if (data.length > 0) {
+        const cheapest = data.reduce((min, d) => d.cost < min.cost ? d : min, data[0])
+        setSelectedDelivery(cheapest)
+      }
+    } catch(e) {
+      console.error('Ошибка расчёта доставки:', e)
+      setSnackbar('Не удалось рассчитать стоимость доставки')
+    }
     setDeliveryLoading(false)
   }
 
-  const tariffName = (code) => ({
-    136: 'Обычная ПВЗ', 234: 'Экономичная ПВЗ', 368: 'Обычная Постамат', 378: 'Экономичная Постамат'
-  })[code] || `Тариф ${code}`
+  const tariffName = (code) => {
+    const names = {
+      136: 'ПВЗ — Базовый',
+      234: 'ПВЗ — Экспресс',
+      368: 'Постамат — Базовый',
+      378: 'Постамат — Экспресс'
+    }
+    return names[code] || `Тариф ${code}`
+  }
 
   const cancelOrder = (clearCart) => {
     if (clearCart) setCart([])
@@ -377,12 +409,13 @@ function App() {
     if (!selectedPvz || !selectedDelivery) { setSnackbar('Выберите пункт выдачи и тариф доставки!'); return }
     setSubmitting(true)
     const name = `${form.lastName} ${form.firstName}`
+    const finalTotal = total + (selectedDelivery?.cost || 0)
     fetch(`${API}/api/orders`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        items: cart, 
-        total: total + (selectedDelivery?.cost || 0),
+        items: cart,
+        total: finalTotal,
         name,
         phone: form.phone,
         address: selectedPvz.address,
@@ -678,9 +711,7 @@ function App() {
                         </Text>
                         <PvzMap
                           pvzList={pvzList}
-                          selectedPvz={selectedPvz}
                           onSelectPvz={selectPvz}
-                          userCoords={userCoords}
                         />
                         <div style={{ maxHeight: '200px', overflowY: 'auto', border: '1px solid #333', borderRadius: '8px', marginBottom: '16px' }}>
                           {pvzList.map(pvz => (
@@ -697,11 +728,39 @@ function App() {
 
                     {deliveryLoading && <div style={{ display: 'flex', justifyContent: 'center', padding: '20px' }}><Spinner /></div>}
 
-                    {/* Здесь можно будет добавить выбор тарифов, когда реализуете расчёт */}
+                    {deliveryOptions.length > 0 && !deliveryLoading && (
+                      <div style={{ background: '#1a1a2e', border: '1px solid #4a4aaa44', borderRadius: '8px', padding: '12px', marginBottom: '16px' }}>
+                        <Text style={{ color: '#aaaaff', fontSize: '13px', marginBottom: '10px', display: 'block' }}>
+                          🚚 Доступные тарифы доставки:
+                        </Text>
+                        {deliveryOptions.map(option => (
+                          <div
+                            key={option.tariff_code}
+                            onClick={() => setSelectedDelivery(option)}
+                            style={{
+                              padding: '12px',
+                              marginBottom: '8px',
+                              border: `2px solid ${selectedDelivery?.tariff_code === option.tariff_code ? '#44cc88' : '#333'}`,
+                              borderRadius: '8px',
+                              cursor: 'pointer',
+                              background: selectedDelivery?.tariff_code === option.tariff_code ? '#0a2a0a' : '#111'
+                            }}
+                          >
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                              <div>
+                                <Text weight="2" style={{ fontSize: '14px', color: '#fff' }}>{tariffName(option.tariff_code)}</Text>
+                                <Text style={{ fontSize: '12px', color: '#888' }}>≈ {option.days} дн.</Text>
+                              </div>
+                              <Text weight="2" style={{ fontSize: '16px', color: '#44cc88' }}>{option.cost} ₽</Text>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
 
                     <div style={{ display: 'flex', gap: '8px', marginTop: '16px' }}>
                       <Button size="l" stretched
-                        disabled={!selectedPvz} // пока достаточно выбора ПВЗ
+                        disabled={!selectedPvz || !selectedDelivery}
                         onClick={() => setCheckoutStep(2)}>
                         Далее →
                       </Button>
@@ -763,9 +822,15 @@ function App() {
                           <Text style={{ color: '#44cc88', fontSize: '13px' }}>−{discount} ₽</Text>
                         </div>
                       )}
-                      <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '8px' }}>
+                      {selectedDelivery && (
+                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                          <Text style={{ color: '#888', fontSize: '13px' }}>Доставка ({tariffName(selectedDelivery.tariff_code)})</Text>
+                          <Text style={{ fontSize: '13px' }}>{selectedDelivery.cost} ₽</Text>
+                        </div>
+                      )}
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '8px', paddingTop: '8px', borderTop: '1px solid #333' }}>
                         <Title level="3">Итого</Title>
-                        <Title level="3">{total} ₽</Title>
+                        <Title level="3">{total + (selectedDelivery?.cost || 0)} ₽</Title>
                       </div>
                     </div>
 

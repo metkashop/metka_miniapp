@@ -347,6 +347,55 @@ app.get('/api/cdek/pvz', async (req, res) => {
   }
 })
 
+// Расчёт тарифов для конкретного ПВЗ (для шага выбора тарифа)
+app.post('/api/cdek/calculate-pvz', async (req, res) => {
+  try {
+    const { city_code, pvz_code, items } = req.body
+    if (!city_code || !pvz_code) {
+      return res.status(400).json({ error: 'city_code и pvz_code обязательны' })
+    }
+    const SENDER_CITY_CODE = parseInt(process.env.SENDER_CITY_CODE) || 137
+    const SENDER_PVZ_CODE = process.env.SENDER_PVZ_CODE || 'SPB160'
+    const TARIFFS = [136, 234] // Только основные тарифы ПВЗ
+
+    let totalWeight = 0
+    let totalCost = 0
+    items.forEach(item => {
+      totalWeight += (item.weight || 300)
+      totalCost += item.price
+    })
+
+    const results = []
+    for (const tariff of TARIFFS) {
+      try {
+        const data = await cdekRequest('POST', '/calculator/tariff', {
+          type: 1,
+          from_location: { code: SENDER_CITY_CODE },
+          to_location: { code: city_code },
+          tariff_code: tariff,
+          shipment_point: SENDER_PVZ_CODE,
+          delivery_point: pvz_code,
+          services: [{ code: 'INSURANCE', parameter: String(totalCost) }],
+          packages: [{ weight: totalWeight, length: 30, width: 40, height: 3 }]
+        })
+        if (data.total_sum) {
+          const rounded = Math.ceil(data.total_sum / 10) * 10
+          results.push({
+            tariff_code: tariff,
+            cost: rounded + 30,
+            days: data.period_min || 3
+          })
+        }
+      } catch(e) {
+        console.log(`Тариф ${tariff} не рассчитался:`, e.message)
+      }
+    }
+    res.json(results)
+  } catch(e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
 // Расчёт тарифов СДЭК
 app.post('/api/cdek/calculate', async (req, res) => {
   try {
