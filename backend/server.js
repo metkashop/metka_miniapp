@@ -254,42 +254,58 @@ async function cdekRequest(method, url, data = null) {
   return res.json()
 }
 
-// ============ ПРОКСИ ДЛЯ ВИДЖЕТА СДЭК ============
-//app.all('/api/cdek-proxy/*path', async (req, res) => {
-//  try {
-//    const proxyPath = req.params.path || '';
-//    const targetUrl = `https://api.cdek.ru/v2/${proxyPath}`;
-//
-//    const token = await getCdekToken();
-//
-//    const fetchOptions = {
-//      method: req.method,
-//      headers: {
-//        'Authorization': `Bearer ${token}`,
-//        'Content-Type': 'application/json'
-//      }
-//    };
-//
-//    if (['POST', 'PUT', 'PATCH'].includes(req.method)) {
-//      fetchOptions.body = JSON.stringify(req.body);
-//    }
-//
-//    const response = await fetch(targetUrl, fetchOptions);
-//
-//    let data;
-//    const contentType = response.headers.get('content-type');
-//    if (contentType && contentType.includes('application/json')) {
-//      data = await response.json();
-//    } else {
-//      data = await response.text();
-//    }
-//
-//    res.status(response.status).json(data);
-//  } catch (error) {
-//    console.error('CDEK widget proxy error:', error);
-//    res.status(500).json({ error: 'Internal server error' });
-//  }
-//});
+// Прокси для виджета СДЭК (эмулирует service.php)
+app.all('/api/cdek-proxy', async (req, res) => {
+  try {
+    const token = await getCdekToken();
+
+    const action = req.query.action;
+    let apiMethod = '';
+    let apiData = { ...req.query }; // начинаем с query-параметров
+
+    // Если есть тело запроса (для POST), добавляем его
+    if (req.method === 'POST' || req.method === 'PUT' || req.method === 'PATCH') {
+      Object.assign(apiData, req.body);
+    }
+
+    if (action === 'offices') {
+      apiMethod = 'deliverypoints';
+      delete apiData.action; // убираем лишний параметр
+    } else if (action === 'calculate') {
+      apiMethod = 'calculator/tarifflist';
+      delete apiData.action;
+    } else {
+      return res.status(400).json({ message: 'Unknown action' });
+    }
+
+    // Формируем URL для API СДЭК
+    const url = new URL(`https://api.cdek.ru/v2/${apiMethod}`);
+    // Добавляем все параметры из apiData в query-строку
+    Object.keys(apiData).forEach(key => url.searchParams.append(key, apiData[key]));
+
+    const fetchOptions = {
+      method: req.method, // сохраняем метод
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+      },
+    };
+
+    // Для методов, которые могут иметь тело (POST и т.д.)
+    if (req.method !== 'GET' && req.method !== 'HEAD') {
+      fetchOptions.body = JSON.stringify(apiData);
+    }
+
+    const response = await fetch(url.toString(), fetchOptions);
+    const responseData = await response.json();
+
+    res.status(response.status).json(responseData);
+  } catch (error) {
+    console.error('CDEK widget proxy error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
 
 // Поиск городов СДЭК
 app.get('/api/cdek/cities', async (req, res) => {

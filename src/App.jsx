@@ -296,7 +296,7 @@ function App() {
       return
     }
 
-    const servicePath = 'https://metkashop.ru/service.php'; // или /backend/service.php
+    const servicePath = `${API}/api/cdek-proxy`;
 
     // defaultLocation — массив [lng, lat] (Москва)
     const defaultLocation = [37.62, 55.75]
