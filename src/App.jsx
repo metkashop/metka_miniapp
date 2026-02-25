@@ -102,7 +102,7 @@ function App() {
   const [promoError, setPromoError] = useState('')
   const [promoLoading, setPromoLoading] = useState(false)
 
-  // Оценка доставки в корзине (оставляем как есть)
+  // Оценка доставки в корзине
   const [cartCitySearch, setCartCitySearch] = useState('')
   const [cartCityResults, setCartCityResults] = useState([])
   const [cartCity, setCartCity] = useState(null)
@@ -119,6 +119,9 @@ function App() {
   const [selectedPvz, setSelectedPvz] = useState(null)
   const [selectedDelivery, setSelectedDelivery] = useState(null)
 
+  // Ключ Яндекс.Карт с сервера
+  const [yandexKey, setYandexKey] = useState('')
+
   const [checkoutStep, setCheckoutStep] = useState(1) 
   const [showCancelDialog, setShowCancelDialog] = useState(false)
 
@@ -133,6 +136,16 @@ function App() {
     fetch(`${API}/api/products`)
       .then(res => res.json())
       .then(data => { setProducts(data); setLoading(false) })
+
+    // Загружаем публичные настройки (ключ Яндекс.Карт)
+    fetch(`${API}/api/config`)
+      .then(res => res.json())
+      .then(data => {
+        setYandexKey(data.yandexMapsApiKey)
+        // Сохраняем в window для доступа из функции виджета
+        window.YANDEX_MAPS_KEY = data.yandexMapsApiKey
+      })
+      .catch(() => {})
   }, [])
 
   const addToCart = (product) => {
@@ -240,12 +253,11 @@ function App() {
     setSelectedCity(city)
     setCitySearch(city.name)
     setCityResults([])
-    // Сбрасываем выбранный ПВЗ и доставку
     setSelectedPvz(null)
     setSelectedDelivery(null)
   }
 
-  // Функция открытия виджета СДЭК
+  // Функция открытия виджета СДЭК версии 3
   const openCdekWidget = () => {
     if (!selectedCity) {
       setSnackbar('Сначала выберите город')
@@ -256,58 +268,100 @@ function App() {
       return
     }
 
-    // Город отправителя (ваш город) – укажите свой или возьмите из .env
-    const senderCity = 'Москва' // или process.env.SENDER_CITY
+    // Город отправителя (ваш город) – замените на свой
+    const fromCity = {
+      city: 'Москва', // или ваш город
+      // code: 137,    // можно указать код города, если известен
+    }
 
-    // Подготавливаем товары для виджета
-    const packages = cart.map(item => ({
-      weight: item.weight || 300,      // граммы
-      length: item.length || 30,       // см
+    // Подготавливаем товары в формате goods (массив iParcel)
+    const goods = cart.map(item => ({
+      weight: item.weight || 300,
+      length: item.length || 30,
       width: item.width || 40,
       height: item.height || 3,
-      declaredValue: item.price        // объявленная ценность (руб)
+      // declaredValue: item.price // если нужна страховка
     }))
 
-    // Контейнер для виджета (скрытый)
-    const widgetContainer = document.getElementById('cdek-widget-container')
-    if (!widgetContainer) return
+    // Создаём контейнер для карты (будет скрыт)
+    const mapContainerId = 'cdek-map-container'
+    let mapContainer = document.getElementById(mapContainerId)
+    if (!mapContainer) {
+      mapContainer = document.createElement('div')
+      mapContainer.id = mapContainerId
+      mapContainer.style.width = '100%'
+      mapContainer.style.height = '600px'
+      mapContainer.style.display = 'none'
+      document.body.appendChild(mapContainer)
+    }
 
-    // Очищаем контейнер перед созданием нового виджета
-    widgetContainer.innerHTML = ''
+    const yandexApiKey = window.YANDEX_MAPS_KEY
+    if (!yandexApiKey) {
+      setSnackbar('Ошибка: не удалось получить ключ Яндекс.Карт')
+      return
+    }
 
-    // Создаём виджет
-    const widget = new window.CDEKWidget({
-      fromCity: senderCity,            // город отправления
-      toCity: selectedCity.name,       // город получателя
-      root: widgetContainer,
-      apiKey: 'mU9Tj2QCZzXiXMTtSmf6AQ4wEIZZ3QuG',        // ⚠️ замени на свой ключ
-      packages: packages,
-      onChoose: (result) => {
-        // result содержит выбранный ПВЗ и стоимость
-        // Пример структуры (см. документацию)
-        const pvz = {
-          code: result.pvzCode,
-          address: result.address,
-          lat: result.coordY,
-          lon: result.coordX,
-          work_time: result.workTime
+    // Путь к нашему прокси на Node.js
+    const servicePath = `${API}/api/cdek-proxy`
+
+    try {
+      const widget = new window.CDEKWidget({
+        from: fromCity,
+        root: mapContainerId,
+        apiKey: yandexApiKey,
+        servicePath: servicePath,
+        goods: goods,
+        onChoose: (deliveryType, tariff, address) => {
+          console.log('Выбрано:', deliveryType, tariff, address)
+
+          let pvz = null
+          let delivery = null
+
+          if (deliveryType === 'office') {
+            // Выбран ПВЗ
+            pvz = {
+              code: address.code,
+              address: address.address,
+              lat: address.location[1], // [lng, lat] → lat = location[1]
+              lon: address.location[0],
+              work_time: address.work_time
+            }
+            delivery = {
+              tariff_code: tariff.tariff_code,
+              cost: tariff.delivery_sum,
+              days: tariff.period_min
+            }
+          } else if (deliveryType === 'door') {
+            // Курьерская доставка
+            pvz = {
+              code: 'courier',
+              address: address.formatted,
+              lat: address.position[1],
+              lon: address.position[0],
+              work_time: ''
+            }
+            delivery = {
+              tariff_code: tariff.tariff_code,
+              cost: tariff.delivery_sum,
+              days: tariff.period_min
+            }
+          }
+
+          if (pvz && delivery) {
+            setSelectedPvz(pvz)
+            setSelectedDelivery(delivery)
+            setSnackbar(`Выбрана доставка: ${tariff.tariff_name} — ${delivery.cost} ₽`)
+          }
+
+          widget.close()
         }
-        const delivery = {
-          tariff_code: result.tariffCode,
-          cost: result.price,
-          days: result.period
-        }
-        setSelectedPvz(pvz)
-        setSelectedDelivery(delivery)
-        setSnackbar(`ПВЗ выбран: ${result.address}`)
-        widget.close()
-      },
-      onClose: () => {
-        console.log('Виджет закрыт')
-      }
-    })
+      })
 
-    widget.open()
+      widget.open()
+    } catch (error) {
+      console.error(error)
+      setSnackbar('Не удалось загрузить виджет СДЭК. Проверьте консоль.')
+    }
   }
 
   const tariffName = (code) => ({
@@ -385,11 +439,10 @@ function App() {
     <ConfigProvider colorScheme="dark">
       <AdaptivityProvider viewWidth={ViewWidth.MOBILE}>
         <AppRoot>
-          {/* Контейнер для виджета СДЭК (скрытый) */}
+          {/* Контейнер для виджета СДЭК (скрытый) – будет создан динамически, но оставим на всякий случай */}
           <div id="cdek-widget-container" style={{ display: 'none' }}></div>
 
           <View activePanel={activePanel}>
-
             <Panel id="splash">
               <div 
                 onClick={() => setActivePanel('catalog')} 

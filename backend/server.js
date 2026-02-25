@@ -20,7 +20,6 @@ let db = null
 async function initDB() {
   const SQL = await initSqlJs()
 
-  // Загружаем существующую базу или создаём новую
   if (fs.existsSync(DB_PATH)) {
     const data = JSON.parse(fs.readFileSync(DB_PATH, 'utf8'))
     db = new SQL.Database(Buffer.from(data, 'base64'))
@@ -28,7 +27,6 @@ async function initDB() {
     db = new SQL.Database()
   }
 
-  // Создаём таблицы
   db.run(`
     CREATE TABLE IF NOT EXISTS products (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -215,11 +213,7 @@ app.delete('/api/promocodes/:id', (req, res) => {
   res.json({ ok: true })
 })
 
-
 // ============ СДЭК ============
-const https = require('https')
-
-// Кэш токена CDEK
 let cdekTokenCache = { token: null, expiresAt: 0 }
 
 async function getCdekToken() {
@@ -239,7 +233,6 @@ async function getCdekToken() {
   const tokenData = await tokenRes.json()
   if (!tokenData.access_token) throw new Error('CDEK token failed')
 
-  // Токен живёт 3600 сек, обновляем за 60 сек до истечения
   cdekTokenCache = {
     token: tokenData.access_token,
     expiresAt: Date.now() + (tokenData.expires_in - 60) * 1000
@@ -260,6 +253,31 @@ async function cdekRequest(method, url, data = null) {
   const res = await fetch(`${CDEK_API_URL}${url}`, options)
   return res.json()
 }
+
+// Прокси для виджета СДЭК (использует Bearer-токен)
+app.post('/api/cdek-proxy/*', async (req, res) => {
+  try {
+    const proxyPath = req.params[0] || ''
+    const targetUrl = `https://api.cdek.ru/v2/${proxyPath}`
+
+    const token = await getCdekToken()
+
+    const response = await fetch(targetUrl, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(req.body)
+    })
+
+    const data = await response.json()
+    res.status(response.status).json(data)
+  } catch (error) {
+    console.error('CDEK widget proxy error:', error)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
 
 // Поиск городов СДЭК
 app.get('/api/cdek/cities', async (req, res) => {
@@ -301,7 +319,6 @@ app.post('/api/cdek/calculate', async (req, res) => {
     const SENDER_PVZ_CODE = process.env.SENDER_PVZ_CODE || 'SPB160'
     const TARIFFS = [136, 234, 368, 378]
 
-    // Считаем суммарный вес и размеры из товаров
     let totalWeight = 0
     let totalCost = 0
     items.forEach(item => {
@@ -337,7 +354,6 @@ app.post('/api/cdek/calculate', async (req, res) => {
     res.status(500).json({ error: e.message })
   }
 })
-
 
 // Оценка стоимости доставки склад-склад (для показа в корзине)
 app.post('/api/cdek/estimate', async (req, res) => {
@@ -405,6 +421,13 @@ app.get('/api/dadata/suggest', async (req, res) => {
   } catch(e) {
     res.status(500).json({ error: e.message })
   }
+})
+
+// Эндпоинт для передачи клиенту публичных настроек
+app.get('/api/config', (req, res) => {
+  res.json({
+    yandexMapsApiKey: process.env.YANDEX_MAPS_API_KEY || ''
+  })
 })
 
 // Запуск
