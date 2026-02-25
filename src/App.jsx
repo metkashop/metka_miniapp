@@ -4,7 +4,55 @@ import { Icon28ShoppingCartOutline, Icon28FavoriteOutline, Icon28Favorite, Icon2
 import bridge from '@vkontakte/vk-bridge'
 import '@vkontakte/vkui/dist/vkui.css'
 
-// ===== Lightbox (увеличение фото) =====
+// ===== ИМПОРТЫ ДЛЯ КАРТЫ =====
+import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet'
+import L from 'leaflet'
+import 'leaflet/dist/leaflet.css'
+
+// Настройка иконок Leaflet
+delete L.Icon.Default.prototype._getIconUrl
+L.Icon.Default.mergeOptions({
+  iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
+  iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
+  shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
+})
+
+// ===== КОМПОНЕНТ КАРТЫ =====
+function PvzMap({ pvzList, selectedPvz, onSelectPvz, userCoords }) {
+  const center = userCoords
+    ? [userCoords.lat, userCoords.lon]
+    : pvzList.length > 0
+    ? [pvzList[0].lat, pvzList[0].lon]
+    : [55.75, 37.62] // Москва по умолчанию
+
+  return (
+    <MapContainer
+      center={center}
+      zoom={12}
+      style={{ height: '300px', width: '100%', borderRadius: '8px', marginBottom: '16px' }}
+    >
+      <TileLayer
+        url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+      />
+      {pvzList.map(pvz => (
+        <Marker
+          key={pvz.code}
+          position={[pvz.lat, pvz.lon]}
+          eventHandlers={{ click: () => onSelectPvz(pvz) }}
+        >
+          <Popup>
+            <strong>{pvz.address}</strong><br />
+            {pvz.work_time && <>Время работы: {pvz.work_time}<br /></>}
+            {pvz.distance && <>Расстояние: {pvz.distance.toFixed(1)} км</>}
+          </Popup>
+        </Marker>
+      ))}
+    </MapContainer>
+  )
+}
+
+// ===== Lightbox =====
 function Lightbox({ src, onClose }) {
   return (
     <div onClick={onClose} style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', background: 'rgba(0,0,0,0.95)', zIndex: 9999, display: 'flex', alignItems: 'flex-start', justifyContent: 'center', cursor: 'zoom-out', overflowY: 'auto' }}>
@@ -110,18 +158,20 @@ function App() {
   const [estimateLoading, setEstimateLoading] = useState(false)
   const cartCityTimer = useRef(null)
 
-  // Для чекаута
+  // СДЭК и Адреса (для чекаута)
   const [citySearch, setCitySearch] = useState('')
   const [cityResults, setCityResults] = useState([])
   const [selectedCity, setSelectedCity] = useState(null)
+  const [streetSearch, setStreetSearch] = useState('')
+  const [streetResults, setStreetResults] = useState([])
+  const [userCoords, setUserCoords] = useState(null)
   
-  // Данные от виджета СДЭК
+  const [pvzList, setPvzList] = useState([])
+  const [pvzLoading, setPvzLoading] = useState(false)
   const [selectedPvz, setSelectedPvz] = useState(null)
+  const [deliveryOptions, setDeliveryOptions] = useState([])
+  const [deliveryLoading, setDeliveryLoading] = useState(false)
   const [selectedDelivery, setSelectedDelivery] = useState(null)
-
-  // Ключ Яндекс.Карт с сервера
-  const [yandexKey, setYandexKey] = useState('')
-
   const [checkoutStep, setCheckoutStep] = useState(1) 
   const [showCancelDialog, setShowCancelDialog] = useState(false)
 
@@ -136,15 +186,6 @@ function App() {
     fetch(`${API}/api/products`)
       .then(res => res.json())
       .then(data => { setProducts(data); setLoading(false) })
-
-    // Загружаем публичные настройки (ключ Яндекс.Карт)
-    fetch(`${API}/api/config`)
-      .then(res => res.json())
-      .then(data => {
-        setYandexKey(data.yandexMapsApiKey)
-        window.YANDEX_MAPS_KEY = data.yandexMapsApiKey
-      })
-      .catch(() => {})
   }, [])
 
   const addToCart = (product) => {
@@ -192,7 +233,7 @@ function App() {
 
   const removePromo = () => { setPromoApplied(null); setPromoCode(''); setPromoError('') }
 
-  // Поиск города для предварительной оценки (в корзине)
+  // Поиск города для предварительной оценки
   const searchCartCity = (q) => {
     setCartCitySearch(q)
     setDeliveryEstimate(null)
@@ -252,118 +293,91 @@ function App() {
     setSelectedCity(city)
     setCitySearch(city.name)
     setCityResults([])
+    setStreetSearch('')
+    setStreetResults([])
+    setPvzList([])
     setSelectedPvz(null)
+    setDeliveryOptions([])
     setSelectedDelivery(null)
   }
 
-  // ===== Функция открытия виджета СДЭК (исправленная) =====
-const openCdekWidget = () => {
-  if (!selectedCity) {
-    setSnackbar('Сначала выберите город')
-    return
-  }
-  if (cart.length === 0) {
-    setSnackbar('Корзина пуста')
-    return
-  }
-
-  const fromCity = {
-    city: 'Москва', // замените на свой город отправления
+  // Поиск улицы через DaData
+  const searchStreet = async (q) => {
+    setStreetSearch(q)
+    if (q.length < 3 || !selectedCity) { setStreetResults([]); return }
+    try {
+      const res = await fetch(`${API}/api/dadata/suggest?city=${encodeURIComponent(selectedCity.name)}&q=${encodeURIComponent(q)}`)
+      const data = await res.json()
+      setStreetResults(data)
+    } catch (e) { console.error(e) }
   }
 
-  // Город получателя – выбранный пользователем
-  const toCity = {
-    city: selectedCity.name,
-    code: selectedCity.code, // если есть код СДЭК
-  }
+  // ВАЖНО: Новая функция selectStreet с использованием вашего прокси
+  const selectStreet = async (suggestion) => {
+    setStreetSearch(suggestion.value)
+    setStreetResults([])
+    setSelectedPvz(null)
+    setDeliveryOptions([])
+    setSelectedDelivery(null)
 
-  const goods = cart.map(item => ({
-    weight: item.weight || 300,
-    length: item.length || 30,
-    width: item.width || 40,
-    height: item.height || 3,
-  }))
-
-  const mapContainerId = 'cdek-map-container'
-  let mapContainer = document.getElementById(mapContainerId)
-  if (!mapContainer) {
-    mapContainer = document.createElement('div')
-    mapContainer.id = mapContainerId
-    mapContainer.style.width = '100%'
-    mapContainer.style.height = '600px'
-    mapContainer.style.display = 'none'
-    document.body.appendChild(mapContainer)
-  }
-
-  const yandexApiKey = window.YANDEX_MAPS_KEY
-  if (!yandexApiKey) {
-    setSnackbar('Ошибка: не удалось получить ключ Яндекс.Карт')
-    return
-  }
-
-  const servicePath = `${API}/api/cdek-proxy`
-  const defaultLocation = [37.62, 55.75] // Москва
-
-  try {
-    const widget = new window.CDEKWidget({
-      from: fromCity,
-      to: toCity, // ✅ обязательно!
-      root: mapContainerId,
-      apiKey: yandexApiKey,
-      servicePath: servicePath,
-      goods: goods,
-      defaultLocation: defaultLocation,
-      popup: true,
-      onChoose: (deliveryType, tariff, address) => {
-        console.log('Выбрано:', deliveryType, tariff, address)
-
-        let pvz = null
-        let delivery = null
-
-        if (deliveryType === 'office') {
-          pvz = {
-            code: address.code,
-            address: address.address,
-            lat: address.location[1],
-            lon: address.location[0],
-            work_time: address.work_time
-          }
-          delivery = {
-            tariff_code: tariff.tariff_code,
-            cost: tariff.delivery_sum,
-            days: tariff.period_min
-          }
-        } else if (deliveryType === 'door') {
-          pvz = {
-            code: 'courier',
-            address: address.formatted,
-            lat: address.position[1],
-            lon: address.position[0],
-            work_time: ''
-          }
-          delivery = {
-            tariff_code: tariff.tariff_code,
-            cost: tariff.delivery_sum,
-            days: tariff.period_min
-          }
-        }
-
-        if (pvz && delivery) {
-          setSelectedPvz(pvz)
-          setSelectedDelivery(delivery)
-          setSnackbar(`Выбрана доставка: ${tariff.tariff_name} — ${delivery.cost} ₽`)
-        }
-
-        widget.close()
+    // Получаем координаты из DaData
+    try {
+      const res = await fetch('https://suggestions.dadata.ru/suggestions/api/4_1/rs/findById/address', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Token f857f124c478d8cd818f19af870979240a757e0d'
+        },
+        body: JSON.stringify({ query: suggestion.unrestricted_value })
+      })
+      const data = await res.json()
+      if (data.suggestions && data.suggestions[0]) {
+        const coords = data.suggestions[0].data.geo_lat && data.suggestions[0].data.geo_lon
+          ? { lat: parseFloat(data.suggestions[0].data.geo_lat), lon: parseFloat(data.suggestions[0].data.geo_lon) }
+          : null
+        setUserCoords(coords)
       }
-    })
+    } catch (e) {}
 
-    widget.open()
-  } catch (error) {
-    console.error(error)
-    setSnackbar('Не удалось загрузить виджет СДЭК. Проверьте консоль.')
+    setPvzLoading(true)
+    try {
+      // Запрашиваем ПВЗ через ваш прокси (он должен работать)
+      const res = await fetch(`${API}/api/cdek-proxy?action=offices&is_handout=true&size=100`)
+      const allPvz = await res.json()
+
+      // Преобразуем в формат для карты
+      const pvzWithCoords = allPvz.map(p => ({
+        code: p.code,
+        address: p.location.address,
+        lat: p.location.latitude,
+        lon: p.location.longitude,
+        work_time: p.work_time
+      }))
+
+      // Рассчитываем расстояние до пользователя
+      const withDistance = pvzWithCoords.map(pvz => {
+        if (!userCoords) return { ...pvz, distance: 999 }
+        const d = 2 * 6371 * Math.asin(Math.sqrt(
+          Math.pow(Math.sin((pvz.lat - userCoords.lat) * Math.PI / 360), 2) +
+          Math.cos(userCoords.lat * Math.PI / 180) * Math.cos(pvz.lat * Math.PI / 180) *
+          Math.pow(Math.sin((pvz.lon - userCoords.lon) * Math.PI / 360), 2)
+        ))
+        return { ...pvz, distance: d }
+      })
+
+      setPvzList(withDistance.sort((a, b) => a.distance - b.distance).slice(0, 20))
+    } catch (e) { console.error(e) }
+    setPvzLoading(false)
   }
-}
+
+  const selectPvz = async (pvz) => {
+    setSelectedPvz(pvz)
+    setDeliveryOptions([])
+    setSelectedDelivery(null)
+    setDeliveryLoading(true)
+    // Здесь можно добавить расчёт тарифов, если нужен
+    setDeliveryLoading(false)
+  }
 
   const tariffName = (code) => ({
     136: 'Обычная ПВЗ', 234: 'Экономичная ПВЗ', 368: 'Обычная Постамат', 378: 'Экономичная Постамат'
@@ -375,7 +389,10 @@ const openCdekWidget = () => {
     setCheckoutStep(1)
     setSelectedCity(null)
     setCitySearch('')
+    setStreetSearch('')
+    setPvzList([])
     setSelectedPvz(null)
+    setDeliveryOptions([])
     setSelectedDelivery(null)
     setActivePanel('catalog')
   }
@@ -383,7 +400,7 @@ const openCdekWidget = () => {
   const submitOrder = () => {
     if (!form.firstName || !form.lastName || !form.phone) { setSnackbar('Заполните все поля!'); return }
     if (!agreePolicy) { setSnackbar('Необходимо согласие с политикой обработки данных!'); return }
-    if (!selectedPvz || !selectedDelivery) { setSnackbar('Выберите пункт выдачи!'); return }
+    if (!selectedPvz || !selectedDelivery) { setSnackbar('Выберите пункт выдачи и тариф доставки!'); return }
     setSubmitting(true)
     const name = `${form.lastName} ${form.firstName}`
     fetch(`${API}/api/orders`, {
@@ -415,7 +432,10 @@ const openCdekWidget = () => {
         setCheckoutStep(1)
         setSelectedCity(null)
         setCitySearch('')
+        setStreetSearch('')
+        setPvzList([])
         setSelectedPvz(null)
+        setDeliveryOptions([])
         setSelectedDelivery(null)
         setActivePanel('catalog')
         setSnackbar(`Заказ №${data.id} оформлен! Мы свяжемся с вами.`)
@@ -440,9 +460,6 @@ const openCdekWidget = () => {
     <ConfigProvider colorScheme="dark">
       <AdaptivityProvider viewWidth={ViewWidth.MOBILE}>
         <AppRoot>
-          {/* Контейнер для виджета СДЭК (скрытый) */}
-          <div id="cdek-widget-container" style={{ display: 'none' }}></div>
-
           <View activePanel={activePanel}>
             <Panel id="splash">
               <div 
@@ -658,32 +675,59 @@ const openCdekWidget = () => {
                     )}
 
                     {selectedCity && (
-                      <>
-                        <FormItem top="2. Выберите пункт выдачи">
-                          <Button 
-                            size="l" 
-                            stretched 
-                            onClick={openCdekWidget}
-                            appearance="accent"
-                          >
-                            Выбрать на карте СДЭК
-                          </Button>
-                        </FormItem>
+                      <FormItem top="2. Введите вашу улицу (найдем ближайшие ПВЗ)">
+                        <Input
+                          placeholder="Например: Ленина"
+                          value={streetSearch}
+                          onChange={e => searchStreet(e.target.value)}
+                        />
+                      </FormItem>
+                    )}
 
-                        {selectedPvz && selectedDelivery && (
-                          <div style={{ background: '#1a2a1a', border: '1px solid #44aa44', borderRadius: '8px', padding: '12px', marginBottom: '16px' }}>
-                            <Text style={{ color: '#88ff88', fontSize: '13px' }}>✅ Выбран ПВЗ: {selectedPvz.address}</Text>
-                            <Text style={{ color: '#88ff88', fontSize: '13px', display: 'block', marginTop: '4px' }}>
-                              🚚 {tariffName(selectedDelivery.tariff_code)} — {selectedDelivery.cost} ₽, ≈{selectedDelivery.days} дней
-                            </Text>
+                    {streetResults.length > 0 && (
+                      <div style={{ background: '#1a1a1a', border: '1px solid #333', borderRadius: '8px', marginBottom: '16px', overflow: 'hidden' }}>
+                        {streetResults.map((street, i) => (
+                          <div key={i} onClick={() => selectStreet(street)}
+                            style={{ padding: '10px 12px', cursor: 'pointer', borderBottom: '1px solid #222' }}>
+                            <Text style={{ fontSize: '13px' }}>{street.value}</Text>
                           </div>
-                        )}
+                        ))}
+                      </div>
+                    )}
+
+                    {pvzLoading && <div style={{ display: 'flex', justifyContent: 'center', padding: '20px' }}><Spinner /></div>}
+
+                    {pvzList.length > 0 && !pvzLoading && (
+                      <>
+                        <Text style={{ fontSize: '13px', color: '#888', marginBottom: '8px', display: 'block' }}>
+                          3. Выберите пункт выдачи на карте или из списка:
+                        </Text>
+                        <PvzMap
+                          pvzList={pvzList}
+                          selectedPvz={selectedPvz}
+                          onSelectPvz={selectPvz}
+                          userCoords={userCoords}
+                        />
+                        <div style={{ maxHeight: '200px', overflowY: 'auto', border: '1px solid #333', borderRadius: '8px', marginBottom: '16px' }}>
+                          {pvzList.map(pvz => (
+                            <div key={pvz.code} onClick={() => selectPvz(pvz)}
+                              style={{ padding: '10px 12px', cursor: 'pointer', borderBottom: '1px solid #222', background: selectedPvz?.code === pvz.code ? '#1a3a1a' : 'transparent' }}>
+                              <Text style={{ fontSize: '13px', fontWeight: selectedPvz?.code === pvz.code ? '600' : '400' }}>{pvz.address}</Text>
+                              <Text style={{ fontSize: '11px', color: '#44cc88', marginTop: '2px' }}>≈ {pvz.distance.toFixed(1)} км от вас</Text>
+                              {pvz.work_time && <Text style={{ fontSize: '11px', color: '#888' }}>{pvz.work_time}</Text>}
+                            </div>
+                          ))}
+                        </div>
                       </>
                     )}
 
+                    {deliveryLoading && <div style={{ display: 'flex', justifyContent: 'center', padding: '20px' }}><Spinner /></div>}
+
+                    {/* Здесь можно будет добавить выбор тарифов, когда реализуете расчёт */}
+
                     <div style={{ display: 'flex', gap: '8px', marginTop: '16px' }}>
                       <Button size="l" stretched
-                        disabled={!selectedDelivery}
+                        disabled={!selectedPvz} // пока достаточно выбора ПВЗ
                         onClick={() => setCheckoutStep(2)}>
                         Далее →
                       </Button>
@@ -694,12 +738,9 @@ const openCdekWidget = () => {
 
                 {checkoutStep === 2 && (
                   <>
-                    {selectedPvz && selectedDelivery && (
+                    {selectedPvz && (
                       <div style={{ background: '#1a2a1a', border: '1px solid #44aa44', borderRadius: '8px', padding: '12px', marginBottom: '16px' }}>
                         <Text style={{ color: '#88ff88', fontSize: '13px' }}>✅ ПВЗ: {selectedPvz.address}</Text>
-                        <Text style={{ color: '#88ff88', fontSize: '13px', display: 'block', marginTop: '4px' }}>
-                          🚚 {tariffName(selectedDelivery.tariff_code)} — {selectedDelivery.cost} ₽, ≈{selectedDelivery.days} дней
-                        </Text>
                       </div>
                     )}
 
@@ -748,13 +789,9 @@ const openCdekWidget = () => {
                           <Text style={{ color: '#44cc88', fontSize: '13px' }}>−{discount} ₽</Text>
                         </div>
                       )}
-                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
-                        <Text style={{ color: '#888', fontSize: '13px' }}>Доставка</Text>
-                        <Text style={{ fontSize: '13px' }}>{selectedDelivery?.cost} ₽</Text>
-                      </div>
                       <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '8px' }}>
                         <Title level="3">Итого</Title>
-                        <Title level="3">{total + (selectedDelivery?.cost || 0)} ₽</Title>
+                        <Title level="3">{total} ₽</Title>
                       </div>
                     </div>
 
