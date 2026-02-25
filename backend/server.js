@@ -254,37 +254,38 @@ async function cdekRequest(method, url, data = null) {
   return res.json()
 }
 
-// Прокси для виджета СДЭК (эмулирует service.php)
+// Прокси для виджета СДЭК с логированием
 app.all('/api/cdek-proxy', async (req, res) => {
+  console.log('🔥 CDEK proxy request:', req.method, req.url, req.query);
   try {
     const token = await getCdekToken();
 
     const action = req.query.action;
     let apiMethod = '';
-    let apiData = { ...req.query }; // начинаем с query-параметров
+    let apiData = { ...req.query };
 
-    // Если есть тело запроса (для POST), добавляем его
     if (req.method === 'POST' || req.method === 'PUT' || req.method === 'PATCH') {
       Object.assign(apiData, req.body);
     }
 
     if (action === 'offices') {
       apiMethod = 'deliverypoints';
-      delete apiData.action; // убираем лишний параметр
+      delete apiData.action;
     } else if (action === 'calculate') {
       apiMethod = 'calculator/tarifflist';
       delete apiData.action;
     } else {
+      console.log('❌ Unknown action:', action);
       return res.status(400).json({ message: 'Unknown action' });
     }
 
-    // Формируем URL для API СДЭК
     const url = new URL(`https://api.cdek.ru/v2/${apiMethod}`);
-    // Добавляем все параметры из apiData в query-строку
     Object.keys(apiData).forEach(key => url.searchParams.append(key, apiData[key]));
 
+    console.log('➡️  Forwarding to CDEK API:', url.toString());
+
     const fetchOptions = {
-      method: req.method, // сохраняем метод
+      method: req.method,
       headers: {
         'Authorization': `Bearer ${token}`,
         'Content-Type': 'application/json',
@@ -292,18 +293,25 @@ app.all('/api/cdek-proxy', async (req, res) => {
       },
     };
 
-    // Для методов, которые могут иметь тело (POST и т.д.)
     if (req.method !== 'GET' && req.method !== 'HEAD') {
       fetchOptions.body = JSON.stringify(apiData);
     }
 
     const response = await fetch(url.toString(), fetchOptions);
-    const responseData = await response.json();
+    let responseData;
+    const contentType = response.headers.get('content-type');
+    if (contentType && contentType.includes('application/json')) {
+      responseData = await response.json();
+    } else {
+      responseData = await response.text();
+      console.log('⚠️  Non-JSON response from CDEK:', responseData.substring(0, 200));
+    }
 
+    console.log('✅ Response status:', response.status);
     res.status(response.status).json(responseData);
   } catch (error) {
-    console.error('CDEK widget proxy error:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    console.error('💥 CDEK widget proxy error:', error);
+    res.status(500).json({ error: 'Internal server error', details: error.message });
   }
 });
 
