@@ -257,7 +257,7 @@ async function cdekRequest(method, url, data = null) {
 // Прокси для виджета СДЭК (использует Bearer-токен)
 app.post('/api/cdek-proxy/*', async (req, res) => {
   try {
-    const proxyPath = req.params[0] || ''
+    const proxyPath = req.params.path || '';
     const targetUrl = `https://api.cdek.ru/v2/${proxyPath}`
 
     const token = await getCdekToken()
