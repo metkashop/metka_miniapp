@@ -317,27 +317,28 @@ function App() {
     setStreetSearch(suggestion.value);
     setStreetResults([]);
     setPvzLoading(true);
-
+  
+    // Используем unrestricted_value, если есть, иначе value
+    const fullAddress = suggestion.unrestricted_value || suggestion.value;
+    console.log('📤 Отправляем адрес на сервер:', fullAddress);
+  
     try {
       const res = await fetch(`${API}/api/get-pvz-by-address`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ address: suggestion.unrestricted_value })
+        body: JSON.stringify({ address: fullAddress })
       });
       const data = await res.json();
-      if (Array.isArray(data)) {
+      if (res.ok) {
+        console.log('✅ Получено ПВЗ:', data.length);
         setPvzList(data);
-        // Если сервер вернул координаты пользователя, можно их сохранить
-        if (data.length > 0 && data[0].userCoords) {
-          setUserCoords(data[0].userCoords);
-        }
       } else {
-        console.error('Ошибка сервера:', data);
-        setSnackbar('Не удалось загрузить ПВЗ');
+        console.error('❌ Ошибка сервера:', data);
+        setSnackbar('Ошибка: ' + (data.error || 'Не удалось загрузить ПВЗ'));
       }
     } catch (e) {
-      console.error(e);
-      setSnackbar('Ошибка соединения');
+      console.error('❌ Ошибка сети:', e);
+      setSnackbar('Ошибка соединения с сервером');
     } finally {
       setPvzLoading(false);
     }

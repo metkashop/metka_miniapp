@@ -468,9 +468,13 @@ app.get('/api/config', (req, res) => {
 
 // ============ НОВЫЙ ЭНДПОИНТ ДЛЯ ПОЛУЧЕНИЯ ПВЗ ПО АДРЕСУ ============
 app.post('/api/get-pvz-by-address', async (req, res) => {
+  console.log('📥 POST /api/get-pvz-by-address body:', req.body); // <-- добавьте это
   try {
     const { address } = req.body;
-    if (!address) return res.status(400).json({ error: 'Address required' });
+    if (!address) {
+      console.log('❌ Address missing in request body');
+      return res.status(400).json({ error: 'Address required' });
+    }
 
     // 1. Извлекаем название города из адреса (как в боте)
     function extractCityFromAddress(addr) {
