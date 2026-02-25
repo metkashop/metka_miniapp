@@ -312,82 +312,36 @@ function App() {
     } catch (e) { console.error(e) }
   }
 
-  // ВАЖНО: Новая функция selectStreet с использованием вашего прокси
-const selectStreet = async (suggestion) => {
-  setStreetSearch(suggestion.value)
-  setStreetResults([])
-  setSelectedPvz(null)
-  setDeliveryOptions([])
-  setSelectedDelivery(null)
+  // ===== УПРОЩЁННАЯ ФУНКЦИЯ ВЫБОРА УЛИЦЫ =====
+  const selectStreet = async (suggestion) => {
+    setStreetSearch(suggestion.value);
+    setStreetResults([]);
+    setPvzLoading(true);
 
-  setPvzLoading(true)
-  
-  let coords = null
-  // 1. Получаем координаты выбранной улицы через DaData
-  try {
-    const res = await fetch('https://suggestions.dadata.ru/suggestions/api/4_1/rs/findById/address', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Token f857f124c478d8cd818f19af870979240a757e0d'
-      },
-      body: JSON.stringify({ query: suggestion.unrestricted_value })
-    })
-    const data = await res.json()
-    console.log('DaData ответ:', data) // отладка
-    if (data.suggestions && data.suggestions[0]) {
-      const lat = data.suggestions[0].data.geo_lat
-      const lon = data.suggestions[0].data.geo_lon
-      if (lat && lon) {
-        coords = { lat: parseFloat(lat), lon: parseFloat(lon) }
-        setUserCoords(coords)
-        console.log('✅ Координаты улицы:', coords)
+    try {
+      const res = await fetch(`${API}/api/get-pvz-by-address`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ address: suggestion.unrestricted_value })
+      });
+      const data = await res.json();
+      if (Array.isArray(data)) {
+        setPvzList(data);
+        // Если сервер вернул координаты пользователя, можно их сохранить
+        if (data.length > 0 && data[0].userCoords) {
+          setUserCoords(data[0].userCoords);
+        }
       } else {
-        console.warn('⚠️ В ответе DaData нет координат')
+        console.error('Ошибка сервера:', data);
+        setSnackbar('Не удалось загрузить ПВЗ');
       }
+    } catch (e) {
+      console.error(e);
+      setSnackbar('Ошибка соединения');
+    } finally {
+      setPvzLoading(false);
     }
-  } catch (e) {
-    console.error('❌ Ошибка запроса к DaData:', e)
-  }
-
-  // 2. Запрашиваем ПВЗ для выбранного города
-  try {
-    const url = `${API}/api/cdek-proxy?action=offices&city_code=${selectedCity.code}&is_handout=true&size=100`
-    console.log('Запрос ПВЗ:', url)
-    const res = await fetch(url)
-    const allPvz = await res.json()
-    console.log(`Получено ПВЗ: ${allPvz.length}`)
-
-    // Преобразуем в формат для карты
-    const pvzWithCoords = allPvz.map(p => ({
-      code: p.code,
-      address: p.location.address,
-      lat: p.location.latitude,
-      lon: p.location.longitude,
-      work_time: p.work_time
-    }))
-
-    // 3. Рассчитываем расстояние (используем локальную переменную coords)
-    const withDistance = pvzWithCoords.map(pvz => {
-      if (!coords) {
-        console.warn('⚠️ Нет координат для расчёта расстояния, ставим 999')
-        return { ...pvz, distance: 999 }
-      }
-      const d = 2 * 6371 * Math.asin(Math.sqrt(
-        Math.pow(Math.sin((pvz.lat - coords.lat) * Math.PI / 360), 2) +
-        Math.cos(coords.lat * Math.PI / 180) * Math.cos(pvz.lat * Math.PI / 180) *
-        Math.pow(Math.sin((pvz.lon - coords.lon) * Math.PI / 360), 2)
-      ))
-      return { ...pvz, distance: d }
-    })
-
-    console.log('Расстояния до ПВЗ:', withDistance.map(p => p.distance.toFixed(1)))
-    setPvzList(withDistance.sort((a, b) => a.distance - b.distance).slice(0, 20))
-  } catch (e) {
-    console.error('❌ Ошибка загрузки ПВЗ:', e)
-  }
-  setPvzLoading(false)
-}
+  };
 
   const selectPvz = async (pvz) => {
     setSelectedPvz(pvz)
