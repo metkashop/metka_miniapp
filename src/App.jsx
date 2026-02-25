@@ -314,61 +314,65 @@ function App() {
 
   // ВАЖНО: Новая функция selectStreet с использованием вашего прокси
   const selectStreet = async (suggestion) => {
-    setStreetSearch(suggestion.value)
-    setStreetResults([])
-    setSelectedPvz(null)
-    setDeliveryOptions([])
-    setSelectedDelivery(null)
+  setStreetSearch(suggestion.value)
+  setStreetResults([])
+  setSelectedPvz(null)
+  setDeliveryOptions([])
+  setSelectedDelivery(null)
 
-    // Получаем координаты из DaData
-    try {
-      const res = await fetch('https://suggestions.dadata.ru/suggestions/api/4_1/rs/findById/address', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Token f857f124c478d8cd818f19af870979240a757e0d'
-        },
-        body: JSON.stringify({ query: suggestion.unrestricted_value })
-      })
-      const data = await res.json()
-      if (data.suggestions && data.suggestions[0]) {
-        const coords = data.suggestions[0].data.geo_lat && data.suggestions[0].data.geo_lon
-          ? { lat: parseFloat(data.suggestions[0].data.geo_lat), lon: parseFloat(data.suggestions[0].data.geo_lon) }
-          : null
+  setPvzLoading(true)
+  
+  // 1. Получаем координаты выбранной улицы
+  let coords = null
+  try {
+    const res = await fetch('https://suggestions.dadata.ru/suggestions/api/4_1/rs/findById/address', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Token f857f124c478d8cd818f19af870979240a757e0d'
+      },
+      body: JSON.stringify({ query: suggestion.unrestricted_value })
+    })
+    const data = await res.json()
+    if (data.suggestions && data.suggestions[0]) {
+      const lat = data.suggestions[0].data.geo_lat
+      const lon = data.suggestions[0].data.geo_lon
+      if (lat && lon) {
+        coords = { lat: parseFloat(lat), lon: parseFloat(lon) }
         setUserCoords(coords)
       }
-    } catch (e) {}
+    }
+  } catch (e) {}
 
-    setPvzLoading(true)
-    try {
-      // Запрашиваем ПВЗ через ваш прокси (он должен работать)
-      const res = await fetch(`${API}/api/cdek-proxy?action=offices&is_handout=true&size=100`)
-      const allPvz = await res.json()
+  // 2. Запрашиваем ПВЗ для выбранного города через ваш прокси
+  try {
+    const res = await fetch(`${API}/api/cdek-proxy?action=offices&city_code=${selectedCity.code}&is_handout=true&size=100`)
+    const allPvz = await res.json()
+    
+    // Преобразуем в нужный формат
+    const pvzWithCoords = allPvz.map(p => ({
+      code: p.code,
+      address: p.location.address,
+      lat: p.location.latitude,
+      lon: p.location.longitude,
+      work_time: p.work_time
+    }))
 
-      // Преобразуем в формат для карты
-      const pvzWithCoords = allPvz.map(p => ({
-        code: p.code,
-        address: p.location.address,
-        lat: p.location.latitude,
-        lon: p.location.longitude,
-        work_time: p.work_time
-      }))
+    // 3. Считаем расстояние до каждого ПВЗ (используем coords, полученные выше)
+    const withDistance = pvzWithCoords.map(pvz => {
+      if (!coords) return { ...pvz, distance: 999 }
+      const d = 2 * 6371 * Math.asin(Math.sqrt(
+        Math.pow(Math.sin((pvz.lat - coords.lat) * Math.PI / 360), 2) +
+        Math.cos(coords.lat * Math.PI / 180) * Math.cos(pvz.lat * Math.PI / 180) *
+        Math.pow(Math.sin((pvz.lon - coords.lon) * Math.PI / 360), 2)
+      ))
+      return { ...pvz, distance: d }
+    })
 
-      // Рассчитываем расстояние до пользователя
-      const withDistance = pvzWithCoords.map(pvz => {
-        if (!userCoords) return { ...pvz, distance: 999 }
-        const d = 2 * 6371 * Math.asin(Math.sqrt(
-          Math.pow(Math.sin((pvz.lat - userCoords.lat) * Math.PI / 360), 2) +
-          Math.cos(userCoords.lat * Math.PI / 180) * Math.cos(pvz.lat * Math.PI / 180) *
-          Math.pow(Math.sin((pvz.lon - userCoords.lon) * Math.PI / 360), 2)
-        ))
-        return { ...pvz, distance: d }
-      })
-
-      setPvzList(withDistance.sort((a, b) => a.distance - b.distance).slice(0, 20))
-    } catch (e) { console.error(e) }
-    setPvzLoading(false)
-  }
+    setPvzList(withDistance.sort((a, b) => a.distance - b.distance).slice(0, 20))
+  } catch (e) { console.error(e) }
+  setPvzLoading(false)
+}
 
   const selectPvz = async (pvz) => {
     setSelectedPvz(pvz)
