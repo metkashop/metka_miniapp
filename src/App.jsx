@@ -142,7 +142,6 @@ function App() {
       .then(res => res.json())
       .then(data => {
         setYandexKey(data.yandexMapsApiKey)
-        // Сохраняем в window для доступа из функции виджета
         window.YANDEX_MAPS_KEY = data.yandexMapsApiKey
       })
       .catch(() => {})
@@ -257,69 +256,110 @@ function App() {
     setSelectedDelivery(null)
   }
 
-  // Функция открытия виджета СДЭК версии 3
+  // ===== Функция открытия виджета СДЭК (исправленная) =====
   const openCdekWidget = () => {
-  if (!selectedCity) {
-    setSnackbar('Сначала выберите город')
-    return
+    if (!selectedCity) {
+      setSnackbar('Сначала выберите город')
+      return
+    }
+    if (cart.length === 0) {
+      setSnackbar('Корзина пуста')
+      return
+    }
+
+    const fromCity = {
+      city: 'Москва', // ⚠️ замените на свой город отправления
+      // code: 137,
+    }
+
+    const goods = cart.map(item => ({
+      weight: item.weight || 300,
+      length: item.length || 30,
+      width: item.width || 40,
+      height: item.height || 3,
+    }))
+
+    const mapContainerId = 'cdek-map-container'
+    let mapContainer = document.getElementById(mapContainerId)
+    if (!mapContainer) {
+      mapContainer = document.createElement('div')
+      mapContainer.id = mapContainerId
+      mapContainer.style.width = '100%'
+      mapContainer.style.height = '600px'
+      mapContainer.style.display = 'none'
+      document.body.appendChild(mapContainer)
+    }
+
+    const yandexApiKey = window.YANDEX_MAPS_KEY
+    if (!yandexApiKey) {
+      setSnackbar('Ошибка: не удалось получить ключ Яндекс.Карт')
+      return
+    }
+
+    const servicePath = `${API}/api/cdek-proxy`
+
+    // defaultLocation — массив [lng, lat] (Москва)
+    const defaultLocation = [37.62, 55.75]
+
+    try {
+      const widget = new window.CDEKWidget({
+        from: fromCity,
+        root: mapContainerId,
+        apiKey: yandexApiKey,
+        servicePath: servicePath,
+        goods: goods,
+        defaultLocation: defaultLocation,
+        popup: true, // обязательно!
+        onChoose: (deliveryType, tariff, address) => {
+          console.log('Выбрано:', deliveryType, tariff, address)
+
+          let pvz = null
+          let delivery = null
+
+          if (deliveryType === 'office') {
+            pvz = {
+              code: address.code,
+              address: address.address,
+              lat: address.location[1],
+              lon: address.location[0],
+              work_time: address.work_time
+            }
+            delivery = {
+              tariff_code: tariff.tariff_code,
+              cost: tariff.delivery_sum,
+              days: tariff.period_min
+            }
+          } else if (deliveryType === 'door') {
+            pvz = {
+              code: 'courier',
+              address: address.formatted,
+              lat: address.position[1],
+              lon: address.position[0],
+              work_time: ''
+            }
+            delivery = {
+              tariff_code: tariff.tariff_code,
+              cost: tariff.delivery_sum,
+              days: tariff.period_min
+            }
+          }
+
+          if (pvz && delivery) {
+            setSelectedPvz(pvz)
+            setSelectedDelivery(delivery)
+            setSnackbar(`Выбрана доставка: ${tariff.tariff_name} — ${delivery.cost} ₽`)
+          }
+
+          widget.close()
+        }
+      })
+
+      widget.open()
+    } catch (error) {
+      console.error(error)
+      setSnackbar('Не удалось загрузить виджет СДЭК. Проверьте консоль.')
+    }
   }
-  if (cart.length === 0) {
-    setSnackbar('Корзина пуста')
-    return
-  }
-
-  const fromCity = {
-    city: 'Москва', // замените на свой город
-    // code: 137,
-  }
-
-  const goods = cart.map(item => ({
-    weight: item.weight || 300,
-    length: item.length || 30,
-    width: item.width || 40,
-    height: item.height || 3,
-  }))
-
-  const mapContainerId = 'cdek-map-container'
-  let mapContainer = document.getElementById(mapContainerId)
-  if (!mapContainer) {
-    mapContainer = document.createElement('div')
-    mapContainer.id = mapContainerId
-    mapContainer.style.width = '100%'
-    mapContainer.style.height = '600px'
-    mapContainer.style.display = 'none'
-    document.body.appendChild(mapContainer)
-  }
-
-  const yandexApiKey = window.YANDEX_MAPS_KEY
-  if (!yandexApiKey) {
-    setSnackbar('Ошибка: не удалось получить ключ Яндекс.Карт')
-    return
-  }
-
-  const servicePath = `${API}/api/cdek-proxy`
-
-  // ✅ Исправлено: defaultLocation — массив [lng, lat]
-  const defaultLocation = [37.62, 55.75] // Москва
-
-  try {
-    const widget = new window.CDEKWidget({
-      from: fromCity,
-      root: mapContainerId,
-      apiKey: yandexApiKey,
-      servicePath: servicePath,
-      goods: goods,
-      defaultLocation: defaultLocation, // теперь правильно
-      onChoose: (deliveryType, tariff, address) => {
-        // ... остальная обработка
-      }
-    })
-    widget.open()
-  } catch (error) {
-    console.error(error)
-    setSnackbar('Не удалось загрузить виджет СДЭК. Проверьте консоль.')
-  }
-}
 
   const tariffName = (code) => ({
     136: 'Обычная ПВЗ', 234: 'Экономичная ПВЗ', 368: 'Обычная Постамат', 378: 'Экономичная Постамат'
@@ -396,7 +436,7 @@ function App() {
     <ConfigProvider colorScheme="dark">
       <AdaptivityProvider viewWidth={ViewWidth.MOBILE}>
         <AppRoot>
-          {/* Контейнер для виджета СДЭК (скрытый) – будет создан динамически, но оставим на всякий случай */}
+          {/* Контейнер для виджета СДЭК (скрытый) */}
           <div id="cdek-widget-container" style={{ display: 'none' }}></div>
 
           <View activePanel={activePanel}>
